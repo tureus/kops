@@ -111,13 +111,20 @@ func (b *NetworkModelBuilder) Build(c *fi.ModelBuilderContext) error {
 	var publicRouteTable *awstasks.RouteTable
 	{
 		// The internet gateway is the main entry point to the cluster.
-		igw := &awstasks.InternetGateway{
-			Name:      s(b.ClusterName()),
-			Lifecycle: b.Lifecycle,
-			VPC:       b.LinkToVPC(),
-			Shared:    fi.Bool(sharedVPC),
+		var igw *awstasks.InternetGateway
+
+		// Skip the creation of the Gateway
+		if b.Cluster.Spec.NetworkSkipCreateGateway {
+			glog.Warningf("Skipping creation of igw, due to networkSkipCreateGateway is set.  Your VPC will not have a default gateway.")
+		} else {
+			igw = &awstasks.InternetGateway{
+				Name:      s(b.ClusterName()),
+				Lifecycle: b.Lifecycle,
+				VPC:       b.LinkToVPC(),
+				Shared:    fi.Bool(sharedVPC),
+			}
+			c.AddTask(igw)
 		}
-		c.AddTask(igw)
 
 		if !allSubnetsShared {
 			publicRouteTable = &awstasks.RouteTable{
@@ -128,14 +135,19 @@ func (b *NetworkModelBuilder) Build(c *fi.ModelBuilderContext) error {
 			}
 			c.AddTask(publicRouteTable)
 
-			// TODO: Validate when allSubnetsShared
-			c.AddTask(&awstasks.Route{
-				Name:            s("0.0.0.0/0"),
-				Lifecycle:       b.Lifecycle,
-				CIDR:            s("0.0.0.0/0"),
-				RouteTable:      publicRouteTable,
-				InternetGateway: igw,
-			})
+			// If the gateway has not been created do not create the route
+			if igw != nil {
+				// TODO: Validate when allSubnetsShared
+				c.AddTask(&awstasks.Route{
+					Name:            s("0.0.0.0/0"),
+					Lifecycle:       b.Lifecycle,
+					CIDR:            s("0.0.0.0/0"),
+					RouteTable:      publicRouteTable,
+					InternetGateway: igw,
+				})
+			} else {
+				glog.Warningf("Skipping creation of default route, due to  networkSkipCreateGateway is set. Your VPC will not have a default route to the internet.")
+			}
 		}
 	}
 
