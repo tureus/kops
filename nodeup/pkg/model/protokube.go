@@ -55,7 +55,7 @@ func (t *ProtokubeBuilder) Build(c *fi.ModelBuilderContext) error {
 	}
 
 	if t.IsMaster {
-		kubeconfig, err := t.buildPKIKubeconfig("kops")
+		kubeconfig, err := t.BuildPKIKubeconfig("kops")
 		if err != nil {
 			return err
 		}
@@ -75,7 +75,7 @@ func (t *ProtokubeBuilder) Build(c *fi.ModelBuilderContext) error {
 				}
 			}
 			for _, x := range []string{"etcd", "etcd-client"} {
-				if err := t.BuildPrivateTask(c, x, fmt.Sprintf("%s-key.pem", x)); err != nil {
+				if err := t.BuildPrivateKeyTask(c, x, fmt.Sprintf("%s-key.pem", x)); err != nil {
 					return err
 				}
 			}
@@ -217,6 +217,9 @@ type ProtokubeFlags struct {
 	TLSCertFile               *string  `json:"tls-cert,omitempty" flag:"tls-cert"`
 	TLSKeyFile                *string  `json:"tls-key,omitempty" flag:"tls-key"`
 	Zone                      []string `json:"zone,omitempty" flag:"zone"`
+
+	// ManageEtcd is true if protokube should manage etcd; being replaced by etcd-manager
+	ManageEtcd bool `json:"manageEtcd,omitempty" flag:"manage-etcd"`
 }
 
 // ProtokubeFlags is responsible for building the command line flags for protokube
@@ -245,6 +248,12 @@ func (t *ProtokubeBuilder) ProtokubeFlags(k8sVersion semver.Version) (*Protokube
 		Master:                    b(t.IsMaster),
 	}
 
+	f.ManageEtcd = false
+	if len(t.NodeupConfig.EtcdManifests) == 0 {
+		glog.V(4).Infof("no EtcdManifests; protokube will manage etcd")
+		f.ManageEtcd = true
+	}
+
 	for _, e := range t.Cluster.Spec.EtcdClusters {
 		// Because we can only specify a single EtcdBackupStore at the moment, we only backup main, not events
 		if e.Name != "main" {
@@ -262,7 +271,7 @@ func (t *ProtokubeBuilder) ProtokubeFlags(k8sVersion semver.Version) (*Protokube
 		}
 	}
 
-	// TODO this is dupicate code with etcd model
+	// TODO this is duplicate code with etcd model
 	image := fmt.Sprintf("k8s.gcr.io/etcd:%s", imageVersion)
 	// override image if set as API value
 	if etcdContainerImage != "" {
@@ -272,10 +281,9 @@ func (t *ProtokubeBuilder) ProtokubeFlags(k8sVersion semver.Version) (*Protokube
 	remapped, err := assets.RemapImage(image)
 	if err != nil {
 		return nil, fmt.Errorf("unable to remap container %q: %v", image, err)
-	} else {
-		image = remapped
 	}
 
+	image = remapped
 	f.EtcdImage = s(image)
 
 	// initialize rbac on Kubernetes >= 1.6 and master

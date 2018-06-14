@@ -229,13 +229,17 @@ type ExecContainerAction struct {
 
 type AuthenticationSpec struct {
 	Kopeio *KopeioAuthenticationSpec `json:"kopeio,omitempty"`
+	Heptio *HeptioAuthenticationSpec `json:"heptio,omitempty"`
 }
 
 func (s *AuthenticationSpec) IsEmpty() bool {
-	return s.Kopeio == nil
+	return s.Kopeio == nil && s.Heptio == nil
 }
 
 type KopeioAuthenticationSpec struct {
+}
+
+type HeptioAuthenticationSpec struct {
 }
 
 type AuthorizationSpec struct {
@@ -285,20 +289,24 @@ type LoadBalancerAccessSpec struct {
 
 // KubeDNSConfig defines the kube dns configuration
 type KubeDNSConfig struct {
-	// Image is the name of the docker image to run
-	// Deprecated as this is now in the addon
-	Image string `json:"image,omitempty"`
-	// Replicas is the number of pod replicas
-	// Deprecated as this is now in the addon, and controlled by autoscaler
-	Replicas int `json:"replicas,omitempty"`
-	// Domain is the dns domain
-	Domain string `json:"domain,omitempty"`
-	// ServerIP is the server ip
-	ServerIP string `json:"serverIP,omitempty"`
 	// CacheMaxSize is the maximum entries to keep in dnsmaq
 	CacheMaxSize int `json:"cacheMaxSize,omitempty"`
 	// CacheMaxConcurrent is the maximum number of concurrent queries for dnsmasq
 	CacheMaxConcurrent int `json:"cacheMaxConcurrent,omitempty"`
+	// Domain is the dns domain
+	Domain string `json:"domain,omitempty"`
+	// Image is the name of the docker image to run - @deprecated as this is now in the addon
+	Image string `json:"image,omitempty"`
+	// Replicas is the number of pod replicas - @deprecated as this is now in the addon, and controlled by autoscaler
+	Replicas int `json:"replicas,omitempty"`
+	// Provider indicates whether CoreDNS or kube-dns will be the default service discovery.
+	Provider string `json:"provider,omitempty"`
+	// ServerIP is the server ip
+	ServerIP string `json:"serverIP,omitempty"`
+	// StubDomains redirects a domains to another DNS service
+	StubDomains map[string][]string `json:"stubDomains,omitempty"`
+	// UpstreamNameservers sets the upstream nameservers for queries not on the cluster domain
+	UpstreamNameservers []string `json:"upstreamNameservers,omitempty"`
 }
 
 // ExternalDNSConfig are options of the dns-controller
@@ -317,7 +325,7 @@ type EtcdClusterSpec struct {
 	Name string `json:"name,omitempty"`
 	// Members stores the configurations for each member of the cluster (including the data volume)
 	Members []*EtcdMemberSpec `json:"etcdMembers,omitempty"`
-	// EnableTLSAuth indicats client and peer TLS auth should be enforced
+	// EnableTLSAuth indicates client and peer TLS auth should be enforced
 	EnableTLSAuth bool `json:"enableTLSAuth,omitempty"`
 	// EnableEtcdTLS indicates the etcd service should use TLS between peers and clients
 	EnableEtcdTLS bool `json:"enableEtcdTLS,omitempty"`
@@ -331,6 +339,8 @@ type EtcdClusterSpec struct {
 	Image string `json:"image,omitempty"`
 	// Backups describes how we do backups of etcd
 	Backups *EtcdBackupSpec `json:"backups,omitempty"`
+	// Manager describes the manager configuration
+	Manager *EtcdManagerSpec `json:"manager,omitempty"`
 }
 
 // EtcdBackupSpec describes how we want to do backups of etcd
@@ -338,6 +348,12 @@ type EtcdBackupSpec struct {
 	// BackupStore is the VFS path where we will read/write backup data
 	BackupStore string `json:"backupStore,omitempty"`
 	// Image is the etcd backup manager image to use.  Setting this will create a sidecar container in the etcd pod with the specified image.
+	Image string `json:"image,omitempty"`
+}
+
+// EtcdManagerSpec describes how we configure the etcd manager
+type EtcdManagerSpec struct {
+	// Image is the etcd manager image to use.
 	Image string `json:"image,omitempty"`
 }
 
