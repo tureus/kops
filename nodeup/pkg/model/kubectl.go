@@ -18,10 +18,12 @@ package model
 
 import (
 	"fmt"
-	"github.com/golang/glog"
+
 	"k8s.io/kops/nodeup/pkg/distros"
 	"k8s.io/kops/upup/pkg/fi"
 	"k8s.io/kops/upup/pkg/fi/nodeup/nodetasks"
+
+	"github.com/golang/glog"
 )
 
 // KubectlBuilder install kubectl
@@ -31,13 +33,12 @@ type KubectlBuilder struct {
 
 var _ fi.ModelBuilder = &KubectlBuilder{}
 
+// Build is responsible for managing the kubectl on the nodes
 func (b *KubectlBuilder) Build(c *fi.ModelBuilderContext) error {
 	if !b.IsMaster {
-		// We don't have the configuration on the machines, so it only works on the master anyway
 		return nil
 	}
 
-	// Add kubectl file as an asset
 	{
 		// TODO: Extract to common function?
 		assetName := "kubectl"
@@ -51,7 +52,7 @@ func (b *KubectlBuilder) Build(c *fi.ModelBuilderContext) error {
 		}
 
 		t := &nodetasks.File{
-			Path:     b.kubectlPath(),
+			Path:     b.KubectlPath() + "/" + assetName,
 			Contents: asset,
 			Type:     nodetasks.FileType_File,
 			Mode:     s("0755"),
@@ -59,7 +60,6 @@ func (b *KubectlBuilder) Build(c *fi.ModelBuilderContext) error {
 		c.AddTask(t)
 	}
 
-	// Add kubeconfig
 	{
 		kubeconfig, err := b.buildPKIKubeconfig("kubecfg")
 		if err != nil {
@@ -74,40 +74,64 @@ func (b *KubectlBuilder) Build(c *fi.ModelBuilderContext) error {
 		}
 		c.AddTask(t)
 
-		switch b.Distribution {
-		case distros.DistributionJessie:
+		adminUser, adminGroup, err := b.findKubeconfigUser()
+		if err != nil {
+			return err
+		}
+
+		if adminUser != nil && adminUser.Home != "" {
 			c.AddTask(&nodetasks.File{
-				Path:  "/home/admin/.kube/",
+				Path:  adminUser.Home + "/.kube/",
 				Type:  nodetasks.FileType_Directory,
 				Mode:  s("0700"),
-				Owner: s("admin"),
-				Group: s("admin"),
+				Owner: s(adminUser.Name),
+				Group: s(adminGroup.Name),
 			})
 
 			c.AddTask(&nodetasks.File{
-				Path:     "/home/admin/.kube/config",
+				Path:     adminUser.Home + "/.kube/config",
 				Contents: fi.NewStringResource(kubeconfig),
 				Type:     nodetasks.FileType_File,
 				Mode:     s("0400"),
-				Owner:    s("admin"),
-				Group:    s("admin"),
+				Owner:    s(adminUser.Name),
+				Group:    s(adminGroup.Name),
 			})
-
-		default:
-			glog.Warningf("Unknown distro; won't write kubeconfig to homedir %s", b.Distribution)
 		}
 	}
 
 	return nil
 }
 
-func (b *KubectlBuilder) kubectlPath() string {
-	kubeletCommand := "/usr/local/bin/kubectl"
-	if b.Distribution == distros.DistributionCoreOS {
-		kubeletCommand = "/opt/bin/kubectl"
+// findKubeconfigUser finds the default user for whom we should create a kubeconfig
+func (b *KubectlBuilder) findKubeconfigUser() (*fi.User, *fi.Group, error) {
+	var users []string
+	switch b.Distribution {
+	case distros.DistributionJessie, distros.DistributionDebian9:
+		users = []string{"admin", "root"}
+	default:
+		glog.Warningf("Unknown distro; won't write kubeconfig to homedir %s", b.Distribution)
+		return nil, nil, nil
 	}
-	if b.Distribution == distros.DistributionContainerOS {
-		kubeletCommand = "/home/kubernetes/bin/kubectl"
+
+	for _, s := range users {
+		user, err := fi.LookupUser(s)
+		if err != nil {
+			glog.Warningf("error looking up user %q: %v", s, err)
+			continue
+		}
+		if user == nil {
+			continue
+		}
+		group, err := fi.LookupGroupById(user.Gid)
+		if err != nil {
+			glog.Warningf("unable to find group %d for user %q", user.Gid, s)
+			continue
+		}
+		if group == nil {
+			continue
+		}
+		return user, group, nil
 	}
-	return kubeletCommand
+
+	return nil, nil, nil
 }

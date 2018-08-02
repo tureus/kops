@@ -19,6 +19,7 @@ package vfs
 import (
 	"fmt"
 	"os"
+	"regexp"
 	"sync"
 	"time"
 
@@ -29,6 +30,14 @@ import (
 	"github.com/aws/aws-sdk-go/service/ec2"
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/golang/glog"
+)
+
+var (
+	// matches all regional naming conventions of S3:
+	// https://docs.aws.amazon.com/general/latest/gr/rande.html#s3_region
+	// TODO: perhaps make region regex more specific, ie. (us|eu|ap|cn|ca|sa), to prevent catching bucket names that match region format?
+	//       but that will mean updating this list when AWS introduces new regions
+	s3UrlRegexp = regexp.MustCompile(`s3([-.](?P<region>\w{2}-\w+-\d{1})|[-.](?P<bucket>[\w.\-\_]+)|)?.amazonaws.com(.cn)?(?P<path>.*)?`)
 )
 
 type S3Context struct {
@@ -65,8 +74,11 @@ func (s *S3Context) getClient(region string) (*s3.S3, error) {
 			}
 		}
 
-		session := session.New()
-		s3Client = s3.New(session, config)
+		sess, err := session.NewSession(config)
+		if err != nil {
+			return nil, fmt.Errorf("error starting new AWS session: %v", err)
+		}
+		s3Client = s3.New(sess, config)
 		s.clients[region] = s3Client
 	}
 
@@ -89,6 +101,7 @@ func getCustomS3Config(endpoint string, region string) (*aws.Config, error) {
 		Region:           aws.String(region),
 		S3ForcePathStyle: aws.Bool(true),
 	}
+	s3Config = s3Config.WithCredentialsChainVerboseErrors(true)
 
 	return s3Config, nil
 }
@@ -178,7 +191,13 @@ out the first result.
 See also: https://docs.aws.amazon.com/goto/WebAPI/s3-2006-03-01/GetBucketLocationRequest
 */
 func bruteforceBucketLocation(region *string, request *s3.GetBucketLocationInput) (*s3.GetBucketLocationOutput, error) {
-	session, _ := session.NewSession(&aws.Config{Region: region})
+	config := &aws.Config{Region: region}
+	config = config.WithCredentialsChainVerboseErrors(true)
+
+	session, err := session.NewSession(config)
+	if err != nil {
+		return nil, fmt.Errorf("error creating aws session: %v", err)
+	}
 
 	regions, err := ec2.New(session).DescribeRegions(nil)
 	if err != nil {
@@ -219,4 +238,26 @@ func validateRegion(region string) error {
 		}
 	}
 	return fmt.Errorf("%s is not a valid region\nPlease check that your region is formatted correctly (i.e. us-east-1)", region)
+}
+
+func VFSPath(url string) (string, error) {
+	if !s3UrlRegexp.MatchString(url) {
+		return "", fmt.Errorf("%s is not a valid S3 URL", url)
+	}
+	groupNames := s3UrlRegexp.SubexpNames()
+	result := s3UrlRegexp.FindAllStringSubmatch(url, -1)[0]
+
+	captured := map[string]string{}
+	for i, value := range result {
+		captured[groupNames[i]] = value
+	}
+	bucket := captured["bucket"]
+	path := captured["path"]
+	if bucket == "" {
+		if path == "" {
+			return "", fmt.Errorf("%s is not a valid S3 URL. No bucket defined.", url)
+		}
+		return fmt.Sprintf("s3:/%s", path), nil
+	}
+	return fmt.Sprintf("s3://%s%s", bucket, path), nil
 }

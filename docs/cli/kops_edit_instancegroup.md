@@ -10,7 +10,7 @@ Edit instancegroup.
 
 Edit a cluster configuration. 
 
-This command changes the instancegroup cloud specification in the registry. 
+This command changes the instancegroup desired configuration in the registry. 
 
   To set your preferred editor, you can define the EDITOR environment variable.
   When you have done this, kops will use the editor that you have set.
@@ -24,7 +24,7 @@ kops edit instancegroup
 ### Examples
 
 ```
-  # Edit a instancegroup configuration.
+  # Edit an instancegroup desired configuration.
   kops edit ig --name k8s-cluster.example.com node --state=s3://kops-state-1234
 ```
 
@@ -36,8 +36,8 @@ kops edit instancegroup
       --log_backtrace_at traceLocation   when logging hits line file:N, emit a stack trace (default :0)
       --log_dir string                   If non-empty, write log files in this directory
       --logtostderr                      log to standard error instead of files (default false)
-      --name string                      Name of cluster
-      --state string                     Location of state storage
+      --name string                      Name of cluster. Overrides KOPS_CLUSTER_NAME environment variable
+      --state string                     Location of state storage. Overrides KOPS_STATE_STORE environment variable
       --stderrthreshold severity         logs at or above this threshold go to stderr (default 2)
   -v, --v Level                          log level for V logs
       --vmodule moduleSpec               comma-separated list of pattern=N settings for file-filtered logging

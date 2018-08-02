@@ -21,6 +21,9 @@ import (
 
 	"encoding/json"
 
+	"net/url"
+	"reflect"
+
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/service/iam"
@@ -30,8 +33,6 @@ import (
 	"k8s.io/kops/upup/pkg/fi/cloudup/awsup"
 	"k8s.io/kops/upup/pkg/fi/cloudup/cloudformation"
 	"k8s.io/kops/upup/pkg/fi/cloudup/terraform"
-	"net/url"
-	"reflect"
 )
 
 //go:generate fitask -type=IAMRole
@@ -106,7 +107,7 @@ func (e *IAMRole) Find(c *fi.Context) (*IAMRole, error) {
 		actual.RolePolicyDocument = fi.WrapResource(fi.NewStringResource(actualPolicy))
 	}
 
-	glog.V(2).Infof("found matching IAMRole %q", *actual.ID)
+	glog.V(2).Infof("found matching IAMRole %q", aws.StringValue(actual.ID))
 	e.ID = actual.ID
 
 	// Avoid spurious changes

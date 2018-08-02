@@ -18,6 +18,7 @@ package kutil
 
 import (
 	"fmt"
+
 	"github.com/golang/glog"
 	restclient "k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -29,7 +30,7 @@ func NewClientConfig(clientConfig *restclient.Config, namespace string) clientcm
 	return c
 }
 
-// ClientConfig is used to make it easy to get an api server client
+// SimpleClientConfig is used to make it easy to get an api server client
 type SimpleClientConfig struct {
 	clientConfig *restclient.Config
 	namespace    string

@@ -2,19 +2,19 @@
 
 ## Quick start
 * [Getting started on AWS](aws.md)
+* [Getting started on GCE](tutorial/gce.md)
 * [CLI reference](cli/kops.md)
 
 
 ## Overview
 
-* [Getting started on AWS](aws.md)
-* [Command-line interface](#commandline-interface)
+* [Command-line interface](#command-line-interface)
 * [Inspection](#inspection)
 * [`kops` design documents](#kops-design-documents)
 * [Networking](#networking)
 * [Operations](#operations)
 * [Security](#security)
-* [Workflows](#workflows)
+* [Development](#development)
 
 
 ## Command-line interface
@@ -45,6 +45,7 @@
 * [Cluster addon manager](addon_manager.md)
 * [Cluster addons](addons.md)
 * [Cluster configuration management](changing_configuration.md)
+* [Cluster desired configuration creation from template](cluster_template.md)
 * [Cluster upgrades and migrations](cluster_upgrades_and_migrations.md)
 * [`etcd` volume encryption setup](etcd_volume_encryption.md)
 * [`etcd` backup setup](etcd_backup.md)
@@ -59,6 +60,8 @@
     * for cluster nodes
 * [Secret management](secrets.md)
 * [Moving from a Single Master to Multiple HA Masters](single-to-multi-master.md)
+* [Upgrading Kubernetes](tutorial/upgrading-kubernetes.md)
+* [Working with Instance Groups](tutorial/working-with-instancegroups.md)
 * [Developers guide for vSphere support](vsphere-dev.md)
 * [vSphere support status](vsphere-development-status.md)
 
@@ -97,7 +100,7 @@
 ## Development
 
 * [Developing using Docker](development/Docker.md)
-* [Development with vSphere](development/vsphere-dev.md)
+* [Development with vSphere](vsphere-dev.md)
 * [Documentation Guidelines](development/documentation.md)
 * [E2E testing with `kops` clusters](development/testing.md)
 * [Example on how to add a feature](development/adding_a_feature.md)

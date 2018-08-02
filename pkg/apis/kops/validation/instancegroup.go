@@ -18,9 +18,11 @@ package validation
 
 import (
 	"fmt"
+
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	"k8s.io/kops/pkg/apis/kops"
 	"k8s.io/kops/pkg/apis/kops/util"
+	"k8s.io/kops/upup/pkg/fi"
 )
 
 func ValidateInstanceGroup(g *kops.InstanceGroup) error {
@@ -38,6 +40,16 @@ func ValidateInstanceGroup(g *kops.InstanceGroup) error {
 		}
 	}
 
+	if g.Spec.MaxSize != nil && g.Spec.MinSize != nil {
+		if *g.Spec.MaxSize < *g.Spec.MinSize {
+			return field.Invalid(field.NewPath("MaxSize"), *g.Spec.MaxSize, "maxSize must be greater than or equal to minSize.")
+		}
+	}
+
+	if fi.Int32Value(g.Spec.RootVolumeIops) < 0 {
+		return field.Invalid(field.NewPath("RootVolumeIops"), g.Spec.RootVolumeIops, "RootVolumeIops must be greater than 0")
+	}
+
 	switch g.Spec.Role {
 	case kops.InstanceGroupRoleMaster:
 	case kops.InstanceGroupRoleNode:
@@ -53,18 +65,27 @@ func ValidateInstanceGroup(g *kops.InstanceGroup) error {
 		}
 	}
 
+	if len(g.Spec.AdditionalUserData) > 0 {
+		for _, UserDataInfo := range g.Spec.AdditionalUserData {
+			err := validateExtraUserData(&UserDataInfo)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
 	return nil
 }
 
-// CrossValidate performs validation of the instance group, including that it is consistent with the Cluster
-// It calls Validate, so all that validation is included.
+// CrossValidateInstanceGroup performs validation of the instance group, including that it is consistent with the Cluster
+// It calls ValidateInstanceGroup, so all that validation is included.
 func CrossValidateInstanceGroup(g *kops.InstanceGroup, cluster *kops.Cluster, strict bool) error {
 	err := ValidateInstanceGroup(g)
 	if err != nil {
 		return err
 	}
 
-	// Check that instance groups are defined in valid zones
+	// Check that instance groups are defined in subnets that are defined in the cluster
 	{
 		clusterSubnets := make(map[string]*kops.ClusterSubnetSpec)
 		for i := range cluster.Spec.Subnets {
@@ -100,6 +121,34 @@ func CrossValidateInstanceGroup(g *kops.InstanceGroup, cluster *kops.Cluster, st
 
 	if len(allErrs) != 0 {
 		return allErrs[0]
+	}
+
+	return nil
+}
+
+func validateExtraUserData(userData *kops.UserData) error {
+	fieldPath := field.NewPath("AdditionalUserData")
+
+	if userData.Name == "" {
+		return field.Required(fieldPath.Child("Name"), "field must be set")
+	}
+
+	if userData.Content == "" {
+		return field.Required(fieldPath.Child("Content"), "field must be set")
+	}
+
+	switch userData.Type {
+	case "text/x-include-once-url":
+	case "text/x-include-url":
+	case "text/cloud-config-archive":
+	case "text/upstart-job":
+	case "text/cloud-config":
+	case "text/part-handler":
+	case "text/x-shellscript":
+	case "text/cloud-boothook":
+
+	default:
+		return field.Invalid(fieldPath.Child("Type"), userData.Type, "Invalid user-data content type")
 	}
 
 	return nil

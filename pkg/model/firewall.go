@@ -20,10 +20,11 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/golang/glog"
 	"k8s.io/kops/pkg/apis/kops"
 	"k8s.io/kops/upup/pkg/fi"
 	"k8s.io/kops/upup/pkg/fi/cloudup/awstasks"
+
+	"github.com/golang/glog"
 )
 
 type Protocol int
@@ -51,16 +52,15 @@ func (b *FirewallModelBuilder) Build(c *fi.ModelBuilderContext) error {
 }
 
 func (b *FirewallModelBuilder) buildNodeRules(c *fi.ModelBuilderContext) error {
-	name := "nodes." + b.ClusterName()
-
 	{
 		t := &awstasks.SecurityGroup{
-			Name:             s(name),
+			Name:             s(b.SecurityGroupName(kops.InstanceGroupRoleNode)),
 			Lifecycle:        b.Lifecycle,
 			VPC:              b.LinkToVPC(),
 			Description:      s("Security group for nodes"),
 			RemoveExtraRules: []string{"port=22"},
 		}
+		t.Tags = b.CloudTags(*t.Name, false)
 		c.AddTask(t)
 	}
 
@@ -85,6 +85,20 @@ func (b *FirewallModelBuilder) buildNodeRules(c *fi.ModelBuilderContext) error {
 			SourceGroup:   b.LinkToSecurityGroup(kops.InstanceGroupRoleNode),
 		}
 		c.AddTask(t)
+	}
+
+	// Pods running in Nodes could need to reach pods in master/s
+	if b.Cluster.Spec.Networking != nil && b.Cluster.Spec.Networking.AmazonVPC != nil {
+		// Nodes can talk to masters
+		{
+			t := &awstasks.SecurityGroupRule{
+				Name:          s("all-nodes-to-master"),
+				Lifecycle:     b.Lifecycle,
+				SecurityGroup: b.LinkToSecurityGroup(kops.InstanceGroupRoleMaster),
+				SourceGroup:   b.LinkToSecurityGroup(kops.InstanceGroupRoleNode),
+			}
+			c.AddTask(t)
+		}
 	}
 
 	// We _should_ block per port... but:
@@ -128,16 +142,40 @@ func (b *FirewallModelBuilder) applyNodeToMasterAllowSpecificPorts(c *fi.ModelBu
 		}
 
 		if b.Cluster.Spec.Networking.Flannel != nil {
-			udpPorts = append(udpPorts, 8285)
+			switch b.Cluster.Spec.Networking.Flannel.Backend {
+			case "", "udp":
+				udpPorts = append(udpPorts, 8285)
+			case "vxlan":
+				udpPorts = append(udpPorts, 8472)
+			default:
+				glog.Warningf("unknown flannel networking backend %q", b.Cluster.Spec.Networking.Flannel.Backend)
+			}
 		}
 
 		if b.Cluster.Spec.Networking.Calico != nil {
 			// Calico needs to access etcd
 			// TODO: Remove, replace with etcd in calico manifest
+			// https://coreos.com/etcd/docs/latest/v2/configuration.html
 			glog.Warningf("Opening etcd port on masters for access from the nodes, for calico.  This is unsafe in untrusted environments.")
 			tcpPorts = append(tcpPorts, 4001)
-
 			tcpPorts = append(tcpPorts, 179)
+			protocols = append(protocols, ProtocolIPIP)
+		}
+
+		if b.Cluster.Spec.Networking.Romana != nil {
+			// Romana needs to access etcd
+			glog.Warningf("Opening etcd port on masters for access from the nodes, for romana.  This is unsafe in untrusted environments.")
+			tcpPorts = append(tcpPorts, 4001)
+			tcpPorts = append(tcpPorts, 9600)
+		}
+
+		if b.Cluster.Spec.Networking.Cilium != nil {
+			// Cilium needs to access etcd
+			glog.Warningf("Opening etcd port on masters for access from the nodes, for Cilium.  This is unsafe in untrusted environments.")
+			tcpPorts = append(tcpPorts, 4001)
+		}
+
+		if b.Cluster.Spec.Networking.Kuberouter != nil {
 			protocols = append(protocols, ProtocolIPIP)
 		}
 	}
@@ -192,7 +230,16 @@ func (b *FirewallModelBuilder) applyNodeToMasterBlockSpecificPorts(c *fi.ModelBu
 
 	// TODO: Make less hacky
 	// TODO: Fix management - we need a wildcard matcher now
-	tcpRanges := []portRange{{From: 1, To: 4000}, {From: 4003, To: 65535}}
+	tcpBlocked := make(map[int]bool)
+
+	// Don't allow nodes to access etcd client port
+	tcpBlocked[4001] = true
+	tcpBlocked[4002] = true
+
+	// Don't allow nodes to access etcd peer port
+	tcpBlocked[2380] = true
+	tcpBlocked[2381] = true
+
 	udpRanges := []portRange{{From: 1, To: 65535}}
 	protocols := []Protocol{}
 
@@ -200,7 +247,25 @@ func (b *FirewallModelBuilder) applyNodeToMasterBlockSpecificPorts(c *fi.ModelBu
 		// Calico needs to access etcd
 		// TODO: Remove, replace with etcd in calico manifest
 		glog.Warningf("Opening etcd port on masters for access from the nodes, for calico.  This is unsafe in untrusted environments.")
-		tcpRanges = []portRange{{From: 1, To: 4001}, {From: 4003, To: 65535}}
+		tcpBlocked[4001] = false
+		protocols = append(protocols, ProtocolIPIP)
+	}
+
+	if b.Cluster.Spec.Networking.Romana != nil {
+		// Romana needs to access etcd
+		glog.Warningf("Opening etcd port on masters for access from the nodes, for romana.  This is unsafe in untrusted environments.")
+		tcpBlocked[4001] = false
+		protocols = append(protocols, ProtocolIPIP)
+	}
+
+	if b.Cluster.Spec.Networking.Cilium != nil {
+		// Cilium needs to access etcd
+		glog.Warningf("Opening etcd port on masters for access from the nodes, for Cilium.  This is unsafe in untrusted environments.")
+		tcpBlocked[4001] = false
+		protocols = append(protocols, ProtocolIPIP)
+	}
+
+	if b.Cluster.Spec.Networking.Kuberouter != nil {
 		protocols = append(protocols, ProtocolIPIP)
 	}
 
@@ -215,6 +280,21 @@ func (b *FirewallModelBuilder) applyNodeToMasterBlockSpecificPorts(c *fi.ModelBu
 			Protocol:      s("udp"),
 		})
 	}
+
+	tcpRanges := []portRange{
+		{From: 1, To: 0},
+	}
+	for port := 1; port < 65536; port++ {
+		previous := &tcpRanges[len(tcpRanges)-1]
+		if !tcpBlocked[port] {
+			if (previous.To + 1) == port {
+				previous.To = port
+			} else {
+				tcpRanges = append(tcpRanges, portRange{From: port, To: port})
+			}
+		}
+	}
+
 	for _, r := range tcpRanges {
 		c.AddTask(&awstasks.SecurityGroupRule{
 			Name:          s(fmt.Sprintf("node-to-master-tcp-%d-%d", r.From, r.To)),
@@ -247,18 +327,19 @@ func (b *FirewallModelBuilder) applyNodeToMasterBlockSpecificPorts(c *fi.ModelBu
 }
 
 func (b *FirewallModelBuilder) buildMasterRules(c *fi.ModelBuilderContext) error {
-	name := "masters." + b.ClusterName()
-
 	{
 		t := &awstasks.SecurityGroup{
-			Name:        s(name),
+			Name:        s(b.SecurityGroupName(kops.InstanceGroupRoleMaster)),
 			Lifecycle:   b.Lifecycle,
 			VPC:         b.LinkToVPC(),
 			Description: s("Security group for masters"),
 			RemoveExtraRules: []string{
 				"port=22",   // SSH
 				"port=443",  // k8s api
-				"port=4001", // etcd main (etcd events is 4002)
+				"port=2380", // etcd main peer
+				"port=2381", // etcd events peer
+				"port=4001", // etcd main
+				"port=4002", // etcd events
 				"port=4789", // VXLAN
 				"port=179",  // Calico
 
@@ -266,6 +347,7 @@ func (b *FirewallModelBuilder) buildMasterRules(c *fi.ModelBuilderContext) error
 				// TODO: Protocol 4 for calico
 			},
 		}
+		t.Tags = b.CloudTags(*t.Name, false)
 		c.AddTask(t)
 	}
 

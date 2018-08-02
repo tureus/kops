@@ -17,10 +17,13 @@ limitations under the License.
 package fitasks
 
 import (
+	"bytes"
 	"fmt"
-	"k8s.io/apimachinery/pkg/util/validation/field"
-	"k8s.io/kops/upup/pkg/fi"
 	"os"
+
+	"k8s.io/apimachinery/pkg/util/validation/field"
+	"k8s.io/kops/pkg/acls"
+	"k8s.io/kops/upup/pkg/fi"
 )
 
 //go:generate fitask -type=ManagedFile
@@ -87,7 +90,14 @@ func (_ *ManagedFile) Render(c *fi.Context, a, e, changes *ManagedFile) error {
 		return fmt.Errorf("error reading contents of ManagedFile: %v", err)
 	}
 
-	err = c.ClusterConfigBase.Join(location).WriteFile(data)
+	p := c.ClusterConfigBase.Join(location)
+
+	acl, err := acls.GetACL(p, c.Cluster)
+	if err != nil {
+		return err
+	}
+
+	err = p.WriteFile(bytes.NewReader(data), acl)
 	if err != nil {
 		return fmt.Errorf("error creating ManagedFile %q: %v", location, err)
 	}

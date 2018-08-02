@@ -16,9 +16,9 @@ specifier, if equivalent images have been copied to various regions with the sam
 
 For example, to use Ubuntu 16.04, you could specify:
 
-`image: 099720109477/ubuntu/images/hvm-ssd/ubuntu-xenial-16.04-amd64-server-20160830`
+`image: 099720109477/ubuntu/images/hvm-ssd/ubuntu-xenial-16.04-amd64-server-20180405`
 
-You can find the name for an image using e.g. `aws ec2 describe-images --image-id ami-a3641cb4`
+You can find the name for an image using e.g. `aws ec2 describe-images --image-id ami-493f2f29`
 
 (Please note that ubuntu is currently undergoing validation testing with k8s - use at your own risk!)
 
@@ -49,6 +49,9 @@ by `kope.io`, (which is a well-known alias to account `383156758163`), with the 
 `k8s-1.4-debian-jessie-amd64-hvm-ebs-2016-10-21`.  By using a name instead of an AMI, we can reference an image
 irrespective of the region in which it is located.
 
+kops should also now work on stock Debian 9 (Stretch) images.  Stock Debian 8 (Jessie) images are not recommended,
+as they typically do not have a suitable kernel and kernel options configured.
+
 ## Ubuntu
 
 Ubuntu is not the default platform, but is believed to be entirely functional.
@@ -57,10 +60,10 @@ Ubuntu 16.04 or later is required (we require systemd).
 
 For example, to use Ubuntu 16.04, you could specify:
 
-`image: 099720109477/ubuntu/images/hvm-ssd/ubuntu-xenial-16.04-amd64-server-20160830`
+`image: 099720109477/ubuntu/images/hvm-ssd/ubuntu-xenial-16.04-amd64-server-20180405`
 
 You can find the name for an image by first consulting [Ubuntu's image finder](https://cloud-images.ubuntu.com/locator/),
-and then using e.g. `aws ec2 describe-images --image-id ami-a3641cb4`
+and then using e.g. `aws ec2 describe-images --image-id ami-493f2f29`
 
 ## CentOS
 
@@ -94,17 +97,26 @@ Be aware of the following limitations:
 
 ## CoreOS
 
-CoreOS support is highly experimental.  Please report any issues.
+CoreOS has been tested enough to be considered ready for production with kops, but if you encounter any problem please report it to us.
 
 The following steps are known:
 
 * The latest stable CoreOS AMI can be found using:
-```
+```bash
 aws ec2 describe-images --region=us-east-1 --owner=595879546273 \
     --filters "Name=virtualization-type,Values=hvm" "Name=name,Values=CoreOS-stable*" \
     --query 'sort_by(Images,&CreationDate)[-1].{id:ImageLocation}'
 ```
 
-* You can specify the name using the `coreos.com` owner alias, for example `coreos.com/CoreOS-stable-1353.8.0-hvm`
+Also, you can obtain the "AMI ID" from CoreOS web page too. They publish their AMI's using a json file at [https://coreos.com/dist/aws/aws-stable.json](https://coreos.com/dist/aws/aws-stable.json). Using some scripting and a "json" parser (like jq) you can obtain the AMI ID from a specific availability zone:
 
-> Note: SSH username will be `core`
+```bash
+curl -s https://coreos.com/dist/aws/aws-stable.json | jq -r '.["us-east-1"].hvm'
+"ami-32705b49"
+```
+
+* You can specify the name using the `coreos.com` owner alias, for example `coreos.com/CoreOS-stable-1409.8.0-hvm` or leave it at `595879546273/CoreOS-stable-1409.8.0-hvm` if you prefer to do so.
+
+As part of our documentation, you will find a practical exercise using CoreOS with KOPS. See the file ["coreos-kops-tests-multimaster.md"](https://github.com/kubernetes/kops/blob/master/docs/examples/coreos-kops-tests-multimaster.md) in the "examples" directory. This exercise covers not only using kops with CoreOS, but also a practical view of KOPS with a multi-master kubernetes setup.
+
+> Note: SSH username for CoreOS based instances will be `core`

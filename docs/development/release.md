@@ -3,7 +3,7 @@
 The kops project is released on an as-needed basis. The process is as follows:
 
 1. An issue is proposing a new release with a changelog since the last release
-1. All [OWNERS](OWNERS) must LGTM this release
+1. All [OWNERS](https://github.com/kubernetes/kops/blob/master/OWNERS) must LGTM this release
 1. An OWNER runs `git tag -s $VERSION` and inserts the changelog and pushes the tag with `git push $VERSION`
 1. The release issue is closed
 1. An announcement email is sent to `kubernetes-dev@googlegroups.com` with the subject `[ANNOUNCE] kops $VERSION is released`
@@ -37,6 +37,7 @@ See [1.5.0-alpha4 commit](https://github.com/kubernetes/kops/commit/a60d7982e04c
 * Edit makefile
 * If updating dns-controller: bump version in Makefile, code, manifests, and tests
 
+`git commit -m "Release 1.X.Y`
 
 ## Check builds OK
 
@@ -73,7 +74,9 @@ git push --tags
 For the time being, we are also maintaining a release branch.  We push released
 versions to that.
 
-`git push origin release`
+`git push origin release-1.8:release`
+
+## Pull request to master branch (for release commit)
 
 ## Upload to github
 
@@ -86,7 +89,12 @@ make release-github
 
 ## Compile release notes
 
-e.g. `git log 1.5.0-alpha2..1.5.0-alpha3 > /tmp/relnotes`
+e.g.
+
+```
+git log 1.8.0-beta.1..1.8.0-beta.2 --oneline | grep Merge.pull | cut -f 5 -d ' ' | tac  > ~/shipbot/prs
+
+```
 
 ## On github
 

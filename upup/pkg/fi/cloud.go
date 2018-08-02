@@ -17,8 +17,10 @@ limitations under the License.
 package fi
 
 import (
+	"k8s.io/api/core/v1"
+	"k8s.io/kops/dnsprovider/pkg/dnsprovider"
 	"k8s.io/kops/pkg/apis/kops"
-	"k8s.io/kubernetes/federation/pkg/dnsprovider"
+	"k8s.io/kops/pkg/cloudinstances"
 )
 
 type Cloud interface {
@@ -28,6 +30,15 @@ type Cloud interface {
 
 	// FindVPCInfo looks up the specified VPC by id, returning info if found, otherwise (nil, nil)
 	FindVPCInfo(id string) (*VPCInfo, error)
+
+	// DeleteInstance deletes a cloud instance
+	DeleteInstance(instance *cloudinstances.CloudInstanceGroupMember) error
+
+	// DeleteGroup deletes the cloud resources that make up a CloudInstanceGroup, including the instances
+	DeleteGroup(group *cloudinstances.CloudInstanceGroup) error
+
+	// GetCloudGroups returns a map of cloud instances that back a kops cluster
+	GetCloudGroups(cluster *kops.Cluster, instancegroups []*kops.InstanceGroup, warnUnmatched bool, nodes []v1.Node) (map[string]*cloudinstances.CloudInstanceGroup, error)
 }
 
 type VPCInfo struct {
@@ -52,24 +63,28 @@ var zonesToCloud = map[string]kops.CloudProviderID{
 	"us-east-1c": kops.CloudProviderAWS,
 	"us-east-1d": kops.CloudProviderAWS,
 	"us-east-1e": kops.CloudProviderAWS,
+	"us-east-1f": kops.CloudProviderAWS,
 
 	"us-east-2a": kops.CloudProviderAWS,
 	"us-east-2b": kops.CloudProviderAWS,
 	"us-east-2c": kops.CloudProviderAWS,
 	"us-east-2d": kops.CloudProviderAWS,
 	"us-east-2e": kops.CloudProviderAWS,
+	"us-east-2f": kops.CloudProviderAWS,
 
 	"us-west-1a": kops.CloudProviderAWS,
 	"us-west-1b": kops.CloudProviderAWS,
 	"us-west-1c": kops.CloudProviderAWS,
 	"us-west-1d": kops.CloudProviderAWS,
 	"us-west-1e": kops.CloudProviderAWS,
+	"us-west-1f": kops.CloudProviderAWS,
 
 	"us-west-2a": kops.CloudProviderAWS,
 	"us-west-2b": kops.CloudProviderAWS,
 	"us-west-2c": kops.CloudProviderAWS,
 	"us-west-2d": kops.CloudProviderAWS,
 	"us-west-2e": kops.CloudProviderAWS,
+	"us-west-2f": kops.CloudProviderAWS,
 
 	"ca-central-1a": kops.CloudProviderAWS,
 	"ca-central-1b": kops.CloudProviderAWS,
@@ -79,6 +94,14 @@ var zonesToCloud = map[string]kops.CloudProviderID{
 	"eu-west-1c": kops.CloudProviderAWS,
 	"eu-west-1d": kops.CloudProviderAWS,
 	"eu-west-1e": kops.CloudProviderAWS,
+
+	"eu-west-2a": kops.CloudProviderAWS,
+	"eu-west-2b": kops.CloudProviderAWS,
+	"eu-west-2c": kops.CloudProviderAWS,
+
+	"eu-west-3a": kops.CloudProviderAWS,
+	"eu-west-3b": kops.CloudProviderAWS,
+	"eu-west-3c": kops.CloudProviderAWS,
 
 	"eu-central-1a": kops.CloudProviderAWS,
 	"eu-central-1b": kops.CloudProviderAWS,
@@ -124,6 +147,9 @@ var zonesToCloud = map[string]kops.CloudProviderID{
 
 	"cn-north-1a": kops.CloudProviderAWS,
 	"cn-north-1b": kops.CloudProviderAWS,
+
+	"cn-northwest-1a": kops.CloudProviderAWS,
+	"cn-northwest-1b": kops.CloudProviderAWS,
 
 	"us-gov-west-1a": kops.CloudProviderAWS,
 	"us-gov-west-1b": kops.CloudProviderAWS,

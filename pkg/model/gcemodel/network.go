@@ -31,9 +31,9 @@ var _ fi.ModelBuilder = &NetworkModelBuilder{}
 
 func (b *NetworkModelBuilder) Build(c *fi.ModelBuilderContext) error {
 	network := &gcetasks.Network{
-		Name:      s("default"),
+		Name:      s(b.NameForNetwork()),
 		Lifecycle: b.Lifecycle,
-		CIDR:      s(b.Cluster.Spec.NetworkCIDR), // Default: s("10.240.0.0/16"),
+		Mode:      "auto", // Automatically create subnets, but stop using legacy mode
 	}
 	c.AddTask(network)
 

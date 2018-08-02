@@ -19,11 +19,12 @@ package cloudup
 import (
 	"encoding/binary"
 	"fmt"
+	"net"
+	"sort"
+
 	"github.com/golang/glog"
 	"k8s.io/kops/pkg/apis/kops"
 	"k8s.io/kops/upup/pkg/fi"
-	"net"
-	"sort"
 )
 
 // ByZone implements sort.Interface for []*ClusterSubnetSpec based on
@@ -45,7 +46,7 @@ func assignCIDRsToSubnets(c *kops.Cluster) error {
 	// for now we'll require users to set CIDRs themselves
 
 	if allSubnetsHaveCIDRs(c) {
-		glog.V(4).Infof("All subnets have CIDRs; skipping asssignment logic")
+		glog.V(4).Infof("All subnets have CIDRs; skipping assignment logic")
 		return nil
 	}
 
@@ -92,7 +93,7 @@ func assignCIDRsToSubnets(c *kops.Cluster) error {
 	}
 
 	if allSubnetsHaveCIDRs(c) {
-		glog.V(4).Infof("All subnets have CIDRs; skipping asssignment logic")
+		glog.V(4).Infof("All subnets have CIDRs; skipping assignment logic")
 		return nil
 	}
 

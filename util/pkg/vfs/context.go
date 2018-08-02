@@ -18,18 +18,21 @@ package vfs
 
 import (
 	"fmt"
-	"github.com/golang/glog"
-	"golang.org/x/net/context"
-	"golang.org/x/oauth2/google"
-	storage "google.golang.org/api/storage/v1"
 	"io/ioutil"
-	"k8s.io/apimachinery/pkg/util/wait"
 	"net/http"
 	"net/url"
 	"os"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/denverdino/aliyungo/oss"
+	"github.com/golang/glog"
+	"github.com/gophercloud/gophercloud"
+	"golang.org/x/net/context"
+	"golang.org/x/oauth2/google"
+	storage "google.golang.org/api/storage/v1"
+	"k8s.io/apimachinery/pkg/util/wait"
 )
 
 // VFSContext is a 'context' for VFS, that is normally a singleton
@@ -42,6 +45,10 @@ type VFSContext struct {
 	mutex sync.Mutex
 	// The google cloud storage client, if initialized
 	gcsClient *storage.Service
+	// swiftClient is the openstack swift client
+	swiftClient *gophercloud.ServiceClient
+	// ossClient is the Aliyun Open Source Storage client
+	ossClient *oss.Client
 }
 
 var Context = VFSContext{
@@ -72,6 +79,9 @@ func (c *VFSContext) ReadFile(location string) ([]byte, error) {
 			case "aws":
 				httpURL := "http://169.254.169.254/latest/" + u.Path
 				return c.readHttpLocation(httpURL, nil)
+			case "digitalocean":
+				httpURL := "http://169.254.169.254/metadata/v1" + u.Path
+				return c.readHttpLocation(httpURL, nil)
 
 			default:
 				return nil, fmt.Errorf("unknown metadata type: %q in %q", u.Host, location)
@@ -96,8 +106,17 @@ func (c *VFSContext) BuildVfsPath(p string) (Path, error) {
 		return NewFSPath(p), nil
 	}
 
+	if strings.HasPrefix(p, "file://") {
+		f := strings.TrimPrefix(p, "file://")
+		return NewFSPath(f), nil
+	}
+
 	if strings.HasPrefix(p, "s3://") {
 		return c.buildS3Path(p)
+	}
+
+	if strings.HasPrefix(p, "do://") {
+		return c.buildDOPath(p)
 	}
 
 	if strings.HasPrefix(p, "memfs://") {
@@ -110,6 +129,14 @@ func (c *VFSContext) BuildVfsPath(p string) (Path, error) {
 
 	if strings.HasPrefix(p, "k8s://") {
 		return c.buildKubernetesPath(p)
+	}
+
+	if strings.HasPrefix(p, "swift://") {
+		return c.buildOpenstackSwiftPath(p)
+	}
+
+	if strings.HasPrefix(p, "oss://") {
+		return c.buildOSSPath(p)
 	}
 
 	return nil, fmt.Errorf("unknown / unhandled path type: %q", p)
@@ -221,7 +248,25 @@ func (c *VFSContext) buildS3Path(p string) (*S3Path, error) {
 		return nil, fmt.Errorf("invalid s3 path: %q", p)
 	}
 
-	s3path := newS3Path(c.s3Context, bucket, u.Path)
+	s3path := newS3Path(c.s3Context, u.Scheme, bucket, u.Path, true)
+	return s3path, nil
+}
+
+func (c *VFSContext) buildDOPath(p string) (*S3Path, error) {
+	u, err := url.Parse(p)
+	if err != nil {
+		return nil, fmt.Errorf("invalid spaces path: %q", p)
+	}
+	if u.Scheme != "do" {
+		return nil, fmt.Errorf("invalid spaces path: %q", p)
+	}
+
+	bucket := strings.TrimSuffix(u.Host, "/")
+	if bucket == "" {
+		return nil, fmt.Errorf("invalid spaces path: %q", p)
+	}
+
+	s3path := newS3Path(c.s3Context, u.Scheme, bucket, u.Path, false)
 	return s3path, nil
 }
 
@@ -284,6 +329,7 @@ func (c *VFSContext) buildGCSPath(p string) (*GSPath, error) {
 	return gcsPath, nil
 }
 
+// getGCSClient returns the google storage.Service client, caching it for future calls
 func (c *VFSContext) getGCSClient() (*storage.Service, error) {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
@@ -307,4 +353,56 @@ func (c *VFSContext) getGCSClient() (*storage.Service, error) {
 
 	c.gcsClient = gcsClient
 	return gcsClient, nil
+}
+
+func (c *VFSContext) buildOpenstackSwiftPath(p string) (*SwiftPath, error) {
+	u, err := url.Parse(p)
+	if err != nil {
+		return nil, fmt.Errorf("invalid openstack cloud storage path: %q", p)
+	}
+
+	if u.Scheme != "swift" {
+		return nil, fmt.Errorf("invalid openstack cloud storage path: %q", p)
+	}
+
+	bucket := strings.TrimSuffix(u.Host, "/")
+	if bucket == "" {
+		return nil, fmt.Errorf("invalid swift path: %q", p)
+	}
+
+	if c.swiftClient == nil {
+		swiftClient, err := NewSwiftClient()
+		if err != nil {
+			return nil, err
+		}
+		c.swiftClient = swiftClient
+	}
+
+	return NewSwiftPath(c.swiftClient, bucket, u.Path)
+}
+
+func (c *VFSContext) buildOSSPath(p string) (*OSSPath, error) {
+	u, err := url.Parse(p)
+	if err != nil {
+		return nil, fmt.Errorf("invalid aliyun oss path: %q", p)
+	}
+
+	if u.Scheme != "oss" {
+		return nil, fmt.Errorf("invalid aliyun oss path: %q", p)
+	}
+
+	bucket := strings.TrimSuffix(u.Host, "/")
+	if bucket == "" {
+		return nil, fmt.Errorf("invalid aliyun oss path: %q", p)
+	}
+
+	if c.ossClient == nil {
+		ossClient, err := NewAliOSSClient()
+		if err != nil {
+			return nil, err
+		}
+		c.ossClient = ossClient
+	}
+
+	return NewOSSPath(c.ossClient, bucket, u.Path)
 }

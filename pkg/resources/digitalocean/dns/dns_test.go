@@ -26,7 +26,7 @@ import (
 	"github.com/digitalocean/godo"
 	"github.com/digitalocean/godo/context"
 
-	"k8s.io/kubernetes/federation/pkg/dnsprovider/rrstype"
+	"k8s.io/kops/dnsprovider/pkg/dnsprovider/rrstype"
 )
 
 type fakeDomainService struct {
@@ -91,11 +91,7 @@ func TestZonesList(t *testing.T) {
 			},
 		}
 
-		resp := &godo.Response{
-			Response: &http.Response{},
-		}
-		resp.StatusCode = http.StatusOK
-		return domains, resp, nil
+		return domains, nil, nil
 	}
 	client.Domains = fake
 
@@ -122,12 +118,7 @@ func TestZonesList(t *testing.T) {
 			},
 		}
 
-		resp := &godo.Response{
-			Response: &http.Response{},
-		}
-		resp.StatusCode = http.StatusInternalServerError
-		resp.Body = ioutil.NopCloser(bytes.NewBufferString("error!"))
-		return domains, resp, nil
+		return domains, nil, errors.New("internal error!")
 	}
 	client.Domains = fake
 
@@ -191,13 +182,8 @@ func TestAdd(t *testing.T) {
 	// bad status code
 	fake.createFunc = func(ctx context.Context, domainCreateRequest *godo.DomainCreateRequest) (*godo.Domain, *godo.Response, error) {
 		domain := &godo.Domain{Name: domainCreateRequest.Name}
-		resp := &godo.Response{
-			Response: &http.Response{},
-		}
-		resp.StatusCode = http.StatusInternalServerError
-		resp.Body = ioutil.NopCloser(bytes.NewBufferString("error!"))
 
-		return domain, resp, nil
+		return domain, nil, errors.New("bad response!")
 	}
 	client.Domains = fake
 
@@ -218,11 +204,8 @@ func TestAdd(t *testing.T) {
 	// godo returns error
 	fake.createFunc = func(ctx context.Context, domainCreateRequest *godo.DomainCreateRequest) (*godo.Domain, *godo.Response, error) {
 		domain := &godo.Domain{Name: domainCreateRequest.Name}
-		resp := &godo.Response{
-			Response: &http.Response{},
-		}
 
-		return domain, resp, errors.New("error!")
+		return domain, nil, errors.New("error!")
 	}
 	client.Domains = fake
 
@@ -247,11 +230,7 @@ func TestRemove(t *testing.T) {
 
 	// happy path
 	fake.deleteFunc = func(ctx context.Context, name string) (*godo.Response, error) {
-		resp := &godo.Response{
-			Response: &http.Response{},
-		}
-		resp.StatusCode = http.StatusOK
-		return resp, nil
+		return nil, nil
 	}
 	client.Domains = fake
 
@@ -266,12 +245,7 @@ func TestRemove(t *testing.T) {
 
 	// bad status code
 	fake.deleteFunc = func(ctx context.Context, name string) (*godo.Response, error) {
-		resp := &godo.Response{
-			Response: &http.Response{},
-		}
-		resp.StatusCode = http.StatusInternalServerError
-		resp.Body = ioutil.NopCloser(bytes.NewBufferString("error!"))
-		return resp, nil
+		return nil, errors.New("bad response!")
 	}
 	client.Domains = fake
 
@@ -364,7 +338,7 @@ func TestNewResourceRecordSet(t *testing.T) {
 		t.Errorf("unexpected number of records: %d", len(rrsets))
 	}
 
-	records, err := rrset.Get("test")
+	records, err := rrset.Get("test.example.com")
 	if err != nil {
 		t.Errorf("unexpected error getting resource record set: %v", err)
 	}
@@ -373,7 +347,7 @@ func TestNewResourceRecordSet(t *testing.T) {
 		t.Errorf("unexpected records from resource record set: %d, expected 1 record", len(records))
 	}
 
-	if records[0].Name() != "test" {
+	if records[0].Name() != "test.example.com" {
 		t.Errorf("unexpected record name: %s, expected 'test'", records[0].Name())
 	}
 

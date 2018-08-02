@@ -18,9 +18,12 @@ package vfsclientset
 
 import (
 	"fmt"
+
 	"github.com/golang/glog"
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/kops/pkg/apis/kops"
@@ -28,22 +31,53 @@ import (
 	"k8s.io/kops/pkg/apis/kops/v1alpha1"
 	"k8s.io/kops/pkg/apis/kops/validation"
 	kopsinternalversion "k8s.io/kops/pkg/client/clientset_generated/clientset/typed/kops/internalversion"
+	"k8s.io/kops/util/pkg/vfs"
 )
 
 type InstanceGroupVFS struct {
 	commonVFS
 
 	clusterName string
+	cluster     *kops.Cluster
 }
 
-func newInstanceGroupVFS(c *VFSClientset, clusterName string) *InstanceGroupVFS {
-	if clusterName == "" {
-		glog.Fatalf("clusterName is required")
+type InstanceGroupMirror interface {
+	WriteMirror(ig *kops.InstanceGroup) error
+}
+
+var _ InstanceGroupMirror = &InstanceGroupVFS{}
+
+func NewInstanceGroupMirror(cluster *kops.Cluster, configBase vfs.Path) InstanceGroupMirror {
+	if cluster == nil || cluster.Name == "" {
+		glog.Fatalf("cluster / cluster.Name is required")
 	}
 
+	clusterName := cluster.Name
 	kind := "InstanceGroup"
 
 	r := &InstanceGroupVFS{
+		cluster:     cluster,
+		clusterName: clusterName,
+	}
+	r.init(kind, configBase.Join("instancegroup"), StoreVersion)
+	defaultReadVersion := v1alpha1.SchemeGroupVersion.WithKind(kind)
+	r.defaultReadVersion = &defaultReadVersion
+	r.validate = func(o runtime.Object) error {
+		return validation.ValidateInstanceGroup(o.(*kops.InstanceGroup))
+	}
+	return r
+}
+
+func newInstanceGroupVFS(c *VFSClientset, cluster *kops.Cluster) *InstanceGroupVFS {
+	if cluster == nil || cluster.Name == "" {
+		glog.Fatalf("cluster / cluster.Name is required")
+	}
+
+	clusterName := cluster.Name
+	kind := "InstanceGroup"
+
+	r := &InstanceGroupVFS{
+		cluster:     cluster,
 		clusterName: clusterName,
 	}
 	r.init(kind, c.basePath.Join(clusterName, "instancegroup"), StoreVersion)
@@ -62,14 +96,13 @@ func (c *InstanceGroupVFS) Get(name string, options metav1.GetOptions) (*api.Ins
 		return nil, fmt.Errorf("ResourceVersion not supported in InstanceGroupVFS::Get")
 	}
 
-	o, err := c.get(name)
+	o, err := c.find(name)
 	if err != nil {
 		return nil, err
 	}
 	if o == nil {
-		return nil, nil
+		return nil, errors.NewNotFound(schema.GroupResource{Group: api.GroupName, Resource: "InstanceGroup"}, name)
 	}
-
 	ig := o.(*api.InstanceGroup)
 	c.addLabels(ig)
 
@@ -97,7 +130,7 @@ func (c *InstanceGroupVFS) List(options metav1.ListOptions) (*api.InstanceGroupL
 }
 
 func (c *InstanceGroupVFS) Create(g *api.InstanceGroup) (*api.InstanceGroup, error) {
-	err := c.create(g)
+	err := c.create(c.cluster, g)
 	if err != nil {
 		return nil, err
 	}
@@ -105,11 +138,20 @@ func (c *InstanceGroupVFS) Create(g *api.InstanceGroup) (*api.InstanceGroup, err
 }
 
 func (c *InstanceGroupVFS) Update(g *api.InstanceGroup) (*api.InstanceGroup, error) {
-	err := c.update(g)
+	err := c.update(c.cluster, g)
 	if err != nil {
 		return nil, err
 	}
 	return g, nil
+}
+
+func (c *InstanceGroupVFS) WriteMirror(g *api.InstanceGroup) error {
+	err := c.writeConfig(c.cluster, c.basePath.Join(g.Name), g)
+	if err != nil {
+		return fmt.Errorf("error writing %s: %v", c.kind, err)
+	}
+
+	return nil
 }
 
 func (c *InstanceGroupVFS) Delete(name string, options *metav1.DeleteOptions) error {

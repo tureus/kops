@@ -18,34 +18,56 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
-	"io"
-
 	"github.com/spf13/cobra"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/kops/cmd/kops/util"
 	api "k8s.io/kops/pkg/apis/kops"
 	"k8s.io/kops/pkg/apis/kops/registry"
 	"k8s.io/kops/util/pkg/tables"
 	"k8s.io/kubernetes/pkg/kubectl/cmd/templates"
-	"k8s.io/kubernetes/pkg/util/i18n"
+	"k8s.io/kubernetes/pkg/kubectl/util/i18n"
 )
 
 var (
-	get_cluster_long = templates.LongDesc(i18n.T(`
+	getClusterLong = templates.LongDesc(i18n.T(`
 	Display one or many cluster resources.`))
 
-	get_cluster_example = templates.Examples(i18n.T(`
+	getClusterExample = templates.Examples(i18n.T(`
 	# Get all clusters in a state store
 	kops get clusters
 
 	# Get a cluster
-	kops get cluster k8s-cluster.example.com`))
+	kops get cluster k8s-cluster.example.com
 
-	get_cluster_short = i18n.T(`Get one or many clusters.`)
+	# Get a cluster YAML desired configuration
+	kops get cluster k8s-cluster.example.com -o yaml
+
+	# Save a cluster desired configuration to YAML file
+	kops get cluster k8s-cluster.example.com -o yaml > cluster-desired-config.yaml
+	`))
+
+	getClusterShort = i18n.T(`Get one or many clusters.`)
+
+	// Warning for --full.  Since we are not using the template from kubectl
+	// we have to have zero white space before the comment characters otherwise
+	// output to stdout is going to be off.
+	get_cluster_full_warning = i18n.T(`
+//
+//   WARNING: Do not use a '--full' cluster specification to define a Kubernetes installation.
+//   You may experience unexpected behavior and other bugs.  Use only the required elements
+//   and any modifications that you require.
+//
+//   Use the following command to retrieve only the required elements:
+//   $ kops get cluster -o yaml
+//
+
+`)
 )
 
 type GetClusterOptions struct {
@@ -66,9 +88,9 @@ func NewCmdGetCluster(f *util.Factory, out io.Writer, getOptions *GetOptions) *c
 	cmd := &cobra.Command{
 		Use:     "clusters",
 		Aliases: []string{"cluster"},
-		Short:   get_cluster_short,
-		Long:    get_cluster_long,
-		Example: get_cluster_example,
+		Short:   getClusterShort,
+		Long:    getClusterLong,
+		Example: getClusterExample,
 		Run: func(cmd *cobra.Command, args []string) {
 			if len(args) != 0 {
 				options.ClusterNames = append(options.ClusterNames, args...)
@@ -111,8 +133,7 @@ func RunGetClusters(context Factory, out io.Writer, options *GetClusterOptions) 
 	}
 
 	if len(clusters) == 0 {
-		fmt.Fprintf(os.Stderr, "No clusters found\n")
-		return nil
+		return fmt.Errorf("no clusters found")
 	}
 
 	if options.FullSpec {
@@ -121,16 +142,24 @@ func RunGetClusters(context Factory, out io.Writer, options *GetClusterOptions) 
 		if err != nil {
 			return err
 		}
+
+		fmt.Fprint(out, get_cluster_full_warning)
+	}
+
+	var obj []runtime.Object
+	if options.output != OutputTable {
+		for _, c := range clusters {
+			obj = append(obj, c)
+		}
 	}
 
 	switch options.output {
 	case OutputTable:
 		return clusterOutputTable(clusters, out)
 	case OutputYaml:
-		return clusterOutputYAML(clusters, out)
+		return fullOutputYAML(out, obj...)
 	case OutputJSON:
-		return clusterOutputJson(clusters, out)
-
+		return fullOutputJSON(out, obj...)
 	default:
 		return fmt.Errorf("Unknown output format: %q", options.output)
 	}
@@ -173,7 +202,9 @@ func clusterOutputTable(clusters []*api.Cluster, out io.Writer) error {
 	t.AddColumn("ZONES", func(c *api.Cluster) string {
 		zones := sets.NewString()
 		for _, s := range c.Spec.Subnets {
-			zones.Insert(s.Zone)
+			if s.Zone != "" {
+				zones.Insert(s.Zone)
+			}
 		}
 		return strings.Join(zones.List(), ",")
 	})
@@ -181,23 +212,47 @@ func clusterOutputTable(clusters []*api.Cluster, out io.Writer) error {
 	return t.Render(clusters, out, "NAME", "CLOUD", "ZONES")
 }
 
-func clusterOutputJson(clusters []*api.Cluster, out io.Writer) error {
-	for _, cluster := range clusters {
-		if err := marshalToWriter(cluster, marshalJSON, out); err != nil {
+// fullOutputJson outputs the marshalled JSON of a list of clusters and instance groups.  It will handle
+// nils for clusters and instanceGroups slices.
+func fullOutputJSON(out io.Writer, args ...runtime.Object) error {
+	argsLen := len(args)
+
+	if argsLen > 1 {
+		if _, err := fmt.Fprint(out, "["); err != nil {
 			return err
 		}
 	}
+
+	for i, arg := range args {
+		if i != 0 {
+			if _, err := fmt.Fprint(out, ","); err != nil {
+				return err
+			}
+		}
+		if err := marshalToWriter(arg, marshalJSON, out); err != nil {
+			return err
+		}
+	}
+
+	if argsLen > 1 {
+		if _, err := fmt.Fprint(out, "]"); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
-func clusterOutputYAML(clusters []*api.Cluster, out io.Writer) error {
-	for i, cluster := range clusters {
+// fullOutputJson outputs the marshalled JSON of a list of clusters and instance groups.  It will handle
+// nils for clusters and instanceGroups slices.
+func fullOutputYAML(out io.Writer, args ...runtime.Object) error {
+	for i, obj := range args {
 		if i != 0 {
 			if err := writeYAMLSep(out); err != nil {
 				return fmt.Errorf("error writing to stdout: %v", err)
 			}
 		}
-		if err := marshalToWriter(cluster, marshalYaml, out); err != nil {
+		if err := marshalToWriter(obj, marshalYaml, out); err != nil {
 			return err
 		}
 	}

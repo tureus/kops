@@ -22,6 +22,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/ec2"
 	"github.com/golang/glog"
+	"k8s.io/apimachinery/pkg/util/validation/field"
 	"k8s.io/kops/pkg/featureflag"
 	"k8s.io/kops/upup/pkg/fi"
 	"k8s.io/kops/upup/pkg/fi/cloudup/awsup"
@@ -36,6 +37,7 @@ type VPC struct {
 
 	ID                 *string
 	CIDR               *string
+	AdditionalCIDR     []string
 	EnableDNSHostnames *bool
 	EnableDNSSupport   *bool
 
@@ -81,6 +83,12 @@ func (e *VPC) Find(c *fi.Context) (*VPC, error) {
 		Tags: intersectTags(vpc.Tags, e.Tags),
 	}
 
+	for _, b := range vpc.CidrBlockAssociationSet {
+		if aws.StringValue(b.CidrBlock) != aws.StringValue(vpc.CidrBlock) {
+			actual.AdditionalCIDR = append(actual.AdditionalCIDR, aws.StringValue(b.CidrBlock))
+		}
+	}
+
 	glog.V(4).Infof("found matching VPC %v", actual)
 
 	if actual.ID != nil {
@@ -107,6 +115,7 @@ func (e *VPC) Find(c *fi.Context) (*VPC, error) {
 		e.ID = actual.ID
 	}
 	actual.Lifecycle = e.Lifecycle
+	actual.Name = e.Name // Name is part of Tags
 
 	return actual, nil
 }
@@ -121,7 +130,7 @@ func (s *VPC) CheckChanges(a, e, changes *VPC) error {
 	if a != nil {
 		if changes.CIDR != nil {
 			// TODO: Do we want to destroy & recreate the VPC?
-			return fi.CannotChangeField("CIDR")
+			return fi.FieldIsImmutable(e.CIDR, a.CIDR, field.NewPath("CIDR"))
 		}
 	}
 	return nil
@@ -143,11 +152,10 @@ func (_ *VPC) RenderAWS(t *awsup.AWSAPITarget, a, e, changes *VPC) error {
 			if featureflag.VPCSkipEnableDNSSupport.Enabled() {
 				glog.Warningf("VPC did not have EnableDNSSupport=true, but ignoring because of VPCSkipEnableDNSSupport feature-flag")
 			} else {
+				// TODO: We could easily just allow kops to fix this...
 				return fmt.Errorf("VPC with id %q was set to be shared, but did not have EnableDNSSupport=true.", fi.StringValue(e.ID))
 			}
 		}
-
-		return nil
 	}
 
 	if a == nil {
@@ -189,12 +197,11 @@ func (_ *VPC) RenderAWS(t *awsup.AWSAPITarget, a, e, changes *VPC) error {
 		}
 	}
 
-	tags := e.Tags
-	if shared {
-		// Don't tag shared resources
-		tags = nil
+	if len(changes.AdditionalCIDR) != 0 {
+		glog.Warningf("AdditionalCIDR changes on a VPC are not currently implemented")
 	}
-	return t.AddAWSTags(*e.ID, tags)
+
+	return t.AddAWSTags(*e.ID, e.Tags)
 }
 
 type terraformVPC struct {
@@ -212,7 +219,13 @@ func (_ *VPC) RenderTerraform(t *terraform.TerraformTarget, a, e, changes *VPC) 
 	shared := fi.BoolValue(e.Shared)
 	if shared {
 		// Not terraform owned / managed
+		// We won't apply changes, but our validation (kops update) will still warn
 		return nil
+	}
+
+	if len(e.AdditionalCIDR) != 0 {
+		// https://github.com/terraform-providers/terraform-provider-aws/issues/3403
+		return fmt.Errorf("terraform does not support AdditionalCIDRs on VPCs")
 	}
 
 	tf := &terraformVPC{
@@ -250,7 +263,12 @@ func (_ *VPC) RenderCloudformation(t *cloudformation.CloudformationTarget, a, e,
 	shared := fi.BoolValue(e.Shared)
 	if shared {
 		// Not cloudformation owned / managed
+		// We won't apply changes, but our validation (kops update) will still warn
 		return nil
+	}
+
+	if len(changes.AdditionalCIDR) != 0 {
+		glog.Warningf("AdditionalCIDR changes on a VPC are not currently implemented")
 	}
 
 	tf := &cloudformationVPC{

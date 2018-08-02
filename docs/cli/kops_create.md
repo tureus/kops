@@ -13,9 +13,8 @@ Create a resource:
   * cluster  
   * instancegroup  
   * secret  
-  * federation  
 
-Create a cluster, instancegroup or secret using command line flags or YAML cluster spec. Clusters and instancegroups can be created using the YAML cluster spec.
+Create a cluster, instancegroup or secret using command line parameters or YAML configuration specification files. (Note: secrets cannot be created from YAML config files yet).
 
 ```
 kops create -f FILENAME
@@ -24,8 +23,11 @@ kops create -f FILENAME
 ### Examples
 
 ```
-  # Create a cluster using a cluser spec file
+  # Create a cluster from the configuration specification in a YAML file
   kops create -f my-cluster.yaml
+  
+  # Create secret from secret spec file
+  kops create -f secret.yaml
   
   # Create a cluster in AWS
   kops create cluster --name=kubernetes-cluster.example.com \
@@ -56,8 +58,8 @@ kops create -f FILENAME
       --log_backtrace_at traceLocation   when logging hits line file:N, emit a stack trace (default :0)
       --log_dir string                   If non-empty, write log files in this directory
       --logtostderr                      log to standard error instead of files (default false)
-      --name string                      Name of cluster
-      --state string                     Location of state storage
+      --name string                      Name of cluster. Overrides KOPS_CLUSTER_NAME environment variable
+      --state string                     Location of state storage. Overrides KOPS_STATE_STORE environment variable
       --stderrthreshold severity         logs at or above this threshold go to stderr (default 2)
   -v, --v Level                          log level for V logs
       --vmodule moduleSpec               comma-separated list of pattern=N settings for file-filtered logging

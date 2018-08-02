@@ -21,6 +21,7 @@ import (
 	"io"
 
 	"bytes"
+
 	"github.com/golang/glog"
 	"github.com/spf13/cobra"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -28,11 +29,12 @@ import (
 	"k8s.io/kops/cmd/kops/util"
 	kopsapi "k8s.io/kops/pkg/apis/kops"
 	"k8s.io/kops/pkg/apis/kops/v1alpha1"
+	"k8s.io/kops/pkg/kopscodecs"
 	"k8s.io/kops/util/pkg/vfs"
 	"k8s.io/kubernetes/pkg/kubectl/cmd/templates"
 	cmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
 	"k8s.io/kubernetes/pkg/kubectl/resource"
-	"k8s.io/kubernetes/pkg/util/i18n"
+	"k8s.io/kubernetes/pkg/kubectl/util/i18n"
 )
 
 type DeleteOptions struct {
@@ -41,11 +43,11 @@ type DeleteOptions struct {
 }
 
 var (
-	delete_long = templates.LongDesc(i18n.T(`
+	deleteLong = templates.LongDesc(i18n.T(`
 	Delete Kubernetes clusters, instancegroups, and secrets, or a combination of the before mentioned.
 	`))
 
-	delete_example = templates.Examples(i18n.T(`
+	deleteExample = templates.Examples(i18n.T(`
 		# Delete a cluster using a manifest file
 		kops delete -f my-cluster.yaml
 
@@ -57,7 +59,7 @@ var (
 		kops delete ig --name=k8s-cluster.example.com node-example --yes
 	`))
 
-	delete_short = i18n.T("Delete clusters,instancegroups, or secrets.")
+	deleteShort = i18n.T("Delete clusters,instancegroups, or secrets.")
 )
 
 func NewCmdDelete(f *util.Factory, out io.Writer) *cobra.Command {
@@ -65,12 +67,12 @@ func NewCmdDelete(f *util.Factory, out io.Writer) *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:        "delete -f FILENAME [--yes]",
-		Short:      delete_short,
-		Long:       delete_long,
-		Example:    delete_example,
+		Short:      deleteShort,
+		Long:       deleteLong,
+		Example:    deleteExample,
 		SuggestFor: []string{"rm"},
 		Run: func(cmd *cobra.Command, args []string) {
-			if cmdutil.IsFilenameEmpty(options.Filenames) {
+			if cmdutil.IsFilenameSliceEmpty(options.Filenames) {
 				cmd.Help()
 				return
 			}
@@ -92,7 +94,7 @@ func NewCmdDelete(f *util.Factory, out io.Writer) *cobra.Command {
 
 func RunDelete(factory *util.Factory, out io.Writer, d *DeleteOptions) error {
 	// Codecs provides access to encoding and decoding for the scheme
-	codec := kopsapi.Codecs.UniversalDecoder(kopsapi.SchemeGroupVersion)
+	codec := kopscodecs.Codecs.UniversalDecoder(kopsapi.SchemeGroupVersion)
 
 	// We could have more than one cluster in a manifest so we are using a set
 	deletedClusters := sets.NewString()

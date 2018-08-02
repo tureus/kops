@@ -25,7 +25,7 @@ import (
 	"github.com/spf13/cobra"
 	"k8s.io/kops/cmd/kops/util"
 	"k8s.io/kubernetes/pkg/kubectl/cmd/templates"
-	"k8s.io/kubernetes/pkg/util/i18n"
+	"k8s.io/kubernetes/pkg/kubectl/util/i18n"
 )
 
 const boilerPlate = `
@@ -45,7 +45,7 @@ const boilerPlate = `
 `
 
 var (
-	completion_shells = map[string]func(out io.Writer, cmd *cobra.Command) error{
+	completionShells = map[string]func(out io.Writer, cmd *cobra.Command) error{
 		"bash": runCompletionBash,
 		"zsh":  runCompletionZsh,
 	}
@@ -58,7 +58,7 @@ type CompletionOptions struct {
 var (
 	completion_long = templates.LongDesc(i18n.T(`
 	Output shell completion code for the specified shell (bash or zsh).
-	The shell code must be evalutated to provide interactive
+	The shell code must be evaluated to provide interactive
 	completion of kops commands.  This can be done by sourcing it from
 	the .bash_profile.
 
@@ -125,7 +125,7 @@ func RunCompletion(f *util.Factory, cmd *cobra.Command, args []string, out io.Wr
 		return fmt.Errorf("shell is required")
 	}
 
-	run, found := completion_shells[c.Shell]
+	run, found := completionShells[c.Shell]
 	if !found {
 		return fmt.Errorf("Unsupported shell type %q.", args[0])
 	}

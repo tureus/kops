@@ -17,10 +17,12 @@ limitations under the License.
 package mockroute53
 
 import (
+	"strings"
+	"sync"
+
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/route53"
 	"github.com/aws/aws-sdk-go/service/route53/route53iface"
-	"strings"
 )
 
 type zoneInfo struct {
@@ -31,6 +33,7 @@ type zoneInfo struct {
 }
 
 type MockRoute53 struct {
+	mutex sync.Mutex
 	Zones []*zoneInfo
 }
 
@@ -50,6 +53,9 @@ func (m *MockRoute53) findZone(hostedZoneId string) *zoneInfo {
 }
 
 func (m *MockRoute53) MockCreateZone(z *route53.HostedZone, vpcs []*route53.VPC) {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+
 	zi := &zoneInfo{
 		ID:         aws.StringValue(z.Id),
 		hostedZone: z,

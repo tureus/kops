@@ -18,18 +18,19 @@ package awsmodel
 
 import (
 	"fmt"
+
 	"github.com/golang/glog"
+
 	"k8s.io/kops/pkg/apis/kops"
 	"k8s.io/kops/pkg/model"
+	"k8s.io/kops/pkg/model/defaults"
 	"k8s.io/kops/upup/pkg/fi"
 	"k8s.io/kops/upup/pkg/fi/cloudup/awstasks"
 )
 
 const (
-	DefaultVolumeSizeNode    = 128
-	DefaultVolumeSizeMaster  = 64
-	DefaultVolumeSizeBastion = 32
-	DefaultVolumeType        = "gp2"
+	DefaultVolumeType = "gp2"
+	DefaultVolumeIops = 100
 )
 
 // AutoscalingGroupModelBuilder configures AutoscalingGroup objects
@@ -38,11 +39,14 @@ type AutoscalingGroupModelBuilder struct {
 
 	BootstrapScript *model.BootstrapScript
 	Lifecycle       *fi.Lifecycle
+
+	SecurityLifecycle *fi.Lifecycle
 }
 
 var _ fi.ModelBuilder = &AutoscalingGroupModelBuilder{}
 
 func (b *AutoscalingGroupModelBuilder) Build(c *fi.ModelBuilderContext) error {
+	var err error
 	for _, ig := range b.InstanceGroups {
 		name := b.AutoscalingGroupName(ig)
 
@@ -51,20 +55,20 @@ func (b *AutoscalingGroupModelBuilder) Build(c *fi.ModelBuilderContext) error {
 		{
 			volumeSize := fi.Int32Value(ig.Spec.RootVolumeSize)
 			if volumeSize == 0 {
-				switch ig.Spec.Role {
-				case kops.InstanceGroupRoleMaster:
-					volumeSize = DefaultVolumeSizeMaster
-				case kops.InstanceGroupRoleNode:
-					volumeSize = DefaultVolumeSizeNode
-				case kops.InstanceGroupRoleBastion:
-					volumeSize = DefaultVolumeSizeBastion
-				default:
-					return fmt.Errorf("this case should not get hit, kops.Role not found %s", ig.Spec.Role)
+				volumeSize, err = defaults.DefaultInstanceGroupVolumeSize(ig.Spec.Role)
+				if err != nil {
+					return err
 				}
 			}
+
 			volumeType := fi.StringValue(ig.Spec.RootVolumeType)
 			if volumeType == "" {
 				volumeType = DefaultVolumeType
+			}
+
+			volumeIops := fi.Int32Value(ig.Spec.RootVolumeIops)
+			if volumeIops <= 0 {
+				volumeIops = DefaultVolumeIops
 			}
 
 			t := &awstasks.LaunchConfiguration{
@@ -77,10 +81,15 @@ func (b *AutoscalingGroupModelBuilder) Build(c *fi.ModelBuilderContext) error {
 				IAMInstanceProfile: b.LinkToIAMInstanceProfile(ig),
 				ImageID:            s(ig.Spec.Image),
 				InstanceType:       s(ig.Spec.MachineType),
+				InstanceMonitoring: ig.Spec.DetailedInstanceMonitoring,
 
 				RootVolumeSize:         i64(int64(volumeSize)),
 				RootVolumeType:         s(volumeType),
 				RootVolumeOptimization: ig.Spec.RootVolumeOptimization,
+			}
+
+			if volumeType == "io1" {
+				t.RootVolumeIops = i64(int64(volumeIops))
 			}
 
 			if ig.Spec.Tenancy != "" {
@@ -92,6 +101,8 @@ func (b *AutoscalingGroupModelBuilder) Build(c *fi.ModelBuilderContext) error {
 					Name:   fi.String(id),
 					ID:     fi.String(id),
 					Shared: fi.Bool(true),
+
+					Lifecycle: b.SecurityLifecycle,
 				}
 				if err := c.EnsureTask(sgTask); err != nil {
 					return err
@@ -99,13 +110,11 @@ func (b *AutoscalingGroupModelBuilder) Build(c *fi.ModelBuilderContext) error {
 				t.SecurityGroups = append(t.SecurityGroups, sgTask)
 			}
 
-			var err error
-
 			if t.SSHKey, err = b.LinkToSSHKey(); err != nil {
 				return err
 			}
 
-			if t.UserData, err = b.BootstrapScript.ResourceNodeUp(ig); err != nil {
+			if t.UserData, err = b.BootstrapScript.ResourceNodeUp(ig, &b.Cluster.Spec); err != nil {
 				return err
 			}
 
@@ -168,6 +177,18 @@ func (b *AutoscalingGroupModelBuilder) Build(c *fi.ModelBuilderContext) error {
 				Name:      s(name),
 				Lifecycle: b.Lifecycle,
 
+				Granularity: s("1Minute"),
+				Metrics: []string{
+					"GroupMinSize",
+					"GroupMaxSize",
+					"GroupDesiredCapacity",
+					"GroupInServiceInstances",
+					"GroupPendingInstances",
+					"GroupStandbyInstances",
+					"GroupTerminatingInstances",
+					"GroupTotalInstances",
+				},
+
 				LaunchConfiguration: launchConfiguration,
 			}
 
@@ -203,6 +224,12 @@ func (b *AutoscalingGroupModelBuilder) Build(c *fi.ModelBuilderContext) error {
 				return fmt.Errorf("error building cloud tags: %v", err)
 			}
 			t.Tags = tags
+
+			if ig.Spec.SuspendProcesses != nil {
+				for _, p := range ig.Spec.SuspendProcesses {
+					t.SuspendProcesses = append(t.SuspendProcesses, p)
+				}
+			}
 
 			c.AddTask(t)
 		}

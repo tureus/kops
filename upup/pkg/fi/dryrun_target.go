@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"reflect"
+	"sort"
 	"strings"
 	"sync"
 
@@ -28,7 +29,6 @@ import (
 	"k8s.io/kops/pkg/assets"
 	"k8s.io/kops/pkg/diff"
 	"k8s.io/kops/upup/pkg/fi/utils"
-	"sort"
 )
 
 // DryRunTarget is a special Target that does not execute anything, but instead tracks all changes.
@@ -215,12 +215,16 @@ func (t *DryRunTarget) PrintReport(taskMap map[string]Task, out io.Writer) error
 				if err != nil {
 					return err
 				}
+				taskName := getTaskName(r.changes)
+				fmt.Fprintf(b, "  %s/%s\n", taskName, idForTask(taskMap, r.e))
+
 				if len(changeList) == 0 {
+					fmt.Fprintf(b, "   internal consistency error!\n")
+					fmt.Fprintf(b, "    actual: %+v\n", r.a)
+					fmt.Fprintf(b, "    expect: %+v\n", r.e)
 					continue
 				}
 
-				taskName := getTaskName(r.changes)
-				fmt.Fprintf(b, "  %s/%s\n", taskName, idForTask(taskMap, r.e))
 				for _, change := range changeList {
 					lines := strings.Split(change.Description, "\n")
 					if len(lines) == 1 {
@@ -247,10 +251,21 @@ func (t *DryRunTarget) PrintReport(taskMap map[string]Task, out io.Writer) error
 		}
 	}
 
-	if len(t.assetBuilder.Assets) != 0 {
-		glog.V(4).Infof("Assets:")
-		for _, a := range t.assetBuilder.Assets {
+	if len(t.assetBuilder.ContainerAssets) != 0 {
+		glog.V(4).Infof("ContainerAssets:")
+		for _, a := range t.assetBuilder.ContainerAssets {
 			glog.V(4).Infof("  %s %s", a.DockerImage, a.CanonicalLocation)
+		}
+	}
+
+	if len(t.assetBuilder.FileAssets) != 0 {
+		glog.V(4).Infof("FileAssets:")
+		for _, a := range t.assetBuilder.FileAssets {
+			if a.FileURL != nil && a.CanonicalFileURL != nil {
+				glog.V(4).Infof("  %s %s", a.FileURL.String(), a.CanonicalFileURL.String())
+			} else if a.FileURL != nil {
+				glog.V(4).Infof("  %s", a.FileURL.String())
+			}
 		}
 	}
 
@@ -339,7 +354,18 @@ func buildChangeList(a, e, changes Task) ([]change, error) {
 }
 
 func tryResourceAsString(v reflect.Value) (string, bool) {
+	if !v.IsValid() {
+		return "", false
+	}
 	if !v.CanInterface() {
+		return "", false
+	}
+
+	// Guard against nil interface go-tcha
+	if v.Kind() == reflect.Interface && v.IsNil() {
+		return "", false
+	}
+	if v.Kind() == reflect.Ptr && v.IsNil() {
 		return "", false
 	}
 
@@ -372,7 +398,7 @@ func getTaskName(t Task) string {
 	return s
 }
 
-// asString returns a human-readable string representation of the passed value
+// ValueAsString returns a human-readable string representation of the passed value
 func ValueAsString(value reflect.Value) string {
 	b := &bytes.Buffer{}
 

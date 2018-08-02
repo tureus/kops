@@ -18,16 +18,18 @@ package kops
 
 import (
 	"fmt"
+	"net/url"
+
 	"github.com/blang/semver"
 	"github.com/golang/glog"
 	"k8s.io/apimachinery/pkg/apis/meta/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/kops/pkg/apis/kops/util"
 	"k8s.io/kops/util/pkg/vfs"
-	"net/url"
 )
 
-const DefaultChannelBase = "https://raw.githubusercontent.com/kubernetes/kops/master/channels/"
+var DefaultChannelBase = "https://raw.githubusercontent.com/kubernetes/kops/master/channels/"
+
 const DefaultChannel = "stable"
 const AlphaChannel = "alpha"
 
@@ -53,9 +55,13 @@ type ChannelSpec struct {
 type KopsVersionSpec struct {
 	Range string `json:"range,omitempty"`
 
+	// RecommendedVersion is the recommended version of kops to use for this Range of kops versions
 	RecommendedVersion string `json:"recommendedVersion,omitempty"`
-	RequiredVersion    string `json:"requiredVersion,omitempty"`
 
+	// RequiredVersion is the required version of kops to use for this Range of kops versions, forcing an upgrade
+	RequiredVersion string `json:"requiredVersion,omitempty"`
+
+	// KubernetesVersion is the default version of kubernetes to use with this kops version e.g. for new clusters
 	KubernetesVersion string `json:"kubernetesVersion,omitempty"`
 }
 
@@ -243,9 +249,11 @@ func FindKopsVersionSpec(versions []KopsVersionSpec, version semver.Version) *Ko
 type CloudProviderID string
 
 const CloudProviderAWS CloudProviderID = "aws"
+const CloudProviderBareMetal CloudProviderID = "baremetal"
 const CloudProviderGCE CloudProviderID = "gce"
 const CloudProviderDO CloudProviderID = "digitalocean"
 const CloudProviderVSphere CloudProviderID = "vsphere"
+const CloudProviderOpenstack CloudProviderID = "openstack"
 
 // FindImage returns the image for the cloudprovider, or nil if none found
 func (c *Channel) FindImage(provider CloudProviderID, kubernetesVersion semver.Version) *ChannelImageSpec {
@@ -281,6 +289,8 @@ func (c *Channel) FindImage(provider CloudProviderID, kubernetesVersion semver.V
 	return matches[0]
 }
 
+// RecommendedKubernetesVersion returns the recommended kubernetes version for a version of kops
+// It is used by default when creating a new cluster, for example
 func RecommendedKubernetesVersion(c *Channel, kopsVersionString string) *semver.Version {
 	kopsVersion, err := semver.ParseTolerant(kopsVersionString)
 	if err != nil {

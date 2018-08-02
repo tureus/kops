@@ -18,11 +18,12 @@ package channels
 
 import (
 	"fmt"
+	"net/url"
+
 	"github.com/golang/glog"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/kops/channels/pkg/api"
-	"net/url"
 )
 
 // Addon is a wrapper around a single version of an addon
@@ -136,7 +137,7 @@ func (a *Addon) EnsureUpdated(k8sClient kubernetes.Interface) (*AddonUpdate, err
 	channel := a.buildChannel()
 	err = channel.SetInstalledVersion(k8sClient, a.ChannelVersion())
 	if err != nil {
-		return nil, fmt.Errorf("error applying annotation to to record addon installation: %v", err)
+		return nil, fmt.Errorf("error applying annotation to record addon installation: %v", err)
 	}
 
 	return required, nil

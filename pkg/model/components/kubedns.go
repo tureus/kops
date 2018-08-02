@@ -36,14 +36,21 @@ func (b *KubeDnsOptionsBuilder) BuildOptions(o interface{}) error {
 	}
 
 	clusterSpec.KubeDNS.Replicas = 2
+
+	if clusterSpec.KubeDNS.CacheMaxSize == 0 {
+		clusterSpec.KubeDNS.CacheMaxSize = 1000
+	}
+
+	if clusterSpec.KubeDNS.CacheMaxConcurrent == 0 {
+		clusterSpec.KubeDNS.CacheMaxConcurrent = 150
+	}
+
 	ip, err := WellKnownServiceIP(clusterSpec, 10)
 	if err != nil {
 		return err
 	}
 	clusterSpec.KubeDNS.ServerIP = ip.String()
 	clusterSpec.KubeDNS.Domain = clusterSpec.ClusterDNSDomain
-	// TODO: Once we start shipping more images, start using them
-	clusterSpec.KubeDNS.Image = "gcr.io/google_containers/kubedns-amd64:1.3"
 
 	return nil
 }

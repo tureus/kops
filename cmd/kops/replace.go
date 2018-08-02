@@ -23,42 +23,53 @@ import (
 
 	"github.com/golang/glog"
 	"github.com/spf13/cobra"
+	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/kops/cmd/kops/util"
-	"k8s.io/kops/util/pkg/vfs"
-
 	kopsapi "k8s.io/kops/pkg/apis/kops"
+	"k8s.io/kops/pkg/commands"
+	"k8s.io/kops/pkg/kopscodecs"
+	"k8s.io/kops/util/pkg/vfs"
 	"k8s.io/kubernetes/pkg/kubectl/cmd/templates"
 	cmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
 	"k8s.io/kubernetes/pkg/kubectl/resource"
-	"k8s.io/kubernetes/pkg/util/i18n"
+	"k8s.io/kubernetes/pkg/kubectl/util/i18n"
 )
 
 var (
-	replace_long = templates.LongDesc(i18n.T(`
-		Replace a resource specification by filename or stdin.`))
+	replaceLong = templates.LongDesc(i18n.T(`
+		Replace a resource desired configuration by filename or stdin.`))
 
-	replace_example = templates.Examples(i18n.T(`
-		# Replace a cluster specification using a file
+	replaceExample = templates.Examples(i18n.T(`
+		# Replace a cluster desired configuration using a YAML file
 		kops replace -f my-cluster.yaml
+
+		# Note, if the resource does not exist the command will error, use --force to provision resource
+		kops replace -f my-cluster.yaml --force
 		`))
 
-	replace_short = i18n.T(`Replace cluster resources.`)
+	replaceShort = i18n.T(`Replace cluster resources.`)
 )
 
-type ReplaceOptions struct {
+// replaceOptions is the options for the command
+type replaceOptions struct {
+	// FilenameOptions is a list of files containing resources
 	resource.FilenameOptions
+	// create any resources not found - we limit to instance groups only for now
+	force bool
 }
 
+// NewCmdReplace returns a new replace command
 func NewCmdReplace(f *util.Factory, out io.Writer) *cobra.Command {
-	options := &ReplaceOptions{}
+	options := &replaceOptions{}
 
 	cmd := &cobra.Command{
 		Use:     "replace -f FILENAME",
-		Short:   replace_short,
-		Long:    replace_long,
-		Example: replace_example,
+		Short:   replaceShort,
+		Long:    replaceLong,
+		Example: replaceExample,
 		Run: func(cmd *cobra.Command, args []string) {
-			if cmdutil.IsFilenameEmpty(options.Filenames) {
+			if cmdutil.IsFilenameSliceEmpty(options.Filenames) {
 				cmd.Help()
 				return
 			}
@@ -66,21 +77,22 @@ func NewCmdReplace(f *util.Factory, out io.Writer) *cobra.Command {
 			cmdutil.CheckErr(RunReplace(f, cmd, out, options))
 		},
 	}
-
 	cmd.Flags().StringSliceVarP(&options.Filenames, "filename", "f", options.Filenames, "A list of one or more files separated by a comma.")
+	cmd.Flags().BoolVarP(&options.force, "force", "", false, "Force any changes, which will also create any non-existing resource")
 	cmd.MarkFlagRequired("filename")
 
 	return cmd
 }
 
-func RunReplace(f *util.Factory, cmd *cobra.Command, out io.Writer, c *ReplaceOptions) error {
+// RunReplace processes the replace command
+func RunReplace(f *util.Factory, cmd *cobra.Command, out io.Writer, c *replaceOptions) error {
 	clientset, err := f.Clientset()
 	if err != nil {
 		return err
 	}
 
 	// Codecs provides access to encoding and decoding for the scheme
-	codecs := kopsapi.Codecs //serializer.NewCodecFactory(scheme)
+	codecs := kopscodecs.Codecs //serializer.NewCodecFactory(scheme)
 
 	codec := codecs.UniversalDecoder(kopsapi.SchemeGroupVersion)
 
@@ -92,23 +104,45 @@ func RunReplace(f *util.Factory, cmd *cobra.Command, out io.Writer, c *ReplaceOp
 		sections := bytes.Split(contents, []byte("\n---\n"))
 
 		for _, section := range sections {
-
 			o, gvk, err := codec.Decode(section, nil, nil)
 			if err != nil {
 				return fmt.Errorf("error parsing file %q: %v", f, err)
 			}
 
 			switch v := o.(type) {
-			case *kopsapi.Federation:
-				_, err = clientset.FederationsFor(v).Update(v)
-				if err != nil {
-					return fmt.Errorf("error replacing federation: %v", err)
-				}
-
 			case *kopsapi.Cluster:
-				_, err = clientset.ClustersFor(v).Update(v)
-				if err != nil {
-					return fmt.Errorf("error replacing cluster: %v", err)
+				{
+					// Retrieve the current status of the cluster.  This will eventually be part of the cluster object.
+					statusDiscovery := &commands.CloudDiscoveryStatusStore{}
+					status, err := statusDiscovery.FindClusterStatus(v)
+					if err != nil {
+						return err
+					}
+
+					// Check if the cluster exists already
+					clusterName := v.Name
+					cluster, err := clientset.GetCluster(clusterName)
+					if err != nil {
+						if errors.IsNotFound(err) {
+							cluster = nil
+						} else {
+							return fmt.Errorf("error fetching cluster %q: %v", clusterName, err)
+						}
+					}
+					if cluster == nil {
+						if !c.force {
+							return fmt.Errorf("cluster %v does not exist (try adding --force flag)", clusterName)
+						}
+						_, err = clientset.CreateCluster(v)
+						if err != nil {
+							return fmt.Errorf("error creating cluster: %v", err)
+						}
+					} else {
+						_, err = clientset.UpdateCluster(v, status)
+						if err != nil {
+							return fmt.Errorf("error replacing cluster: %v", err)
+						}
+					}
 				}
 
 			case *kopsapi.InstanceGroup:
@@ -118,21 +152,41 @@ func RunReplace(f *util.Factory, cmd *cobra.Command, out io.Writer, c *ReplaceOp
 				}
 				cluster, err := clientset.GetCluster(clusterName)
 				if err != nil {
-					return fmt.Errorf("error fetching cluster %q: %v", clusterName, err)
+					if errors.IsNotFound(err) {
+						return fmt.Errorf("cluster %q not found", clusterName)
+					} else {
+						return fmt.Errorf("error fetching cluster %q: %v", clusterName, err)
+					}
 				}
-				if cluster == nil {
-					return fmt.Errorf("cluster %q not found", clusterName)
-				}
-				_, err = clientset.InstanceGroupsFor(cluster).Update(v)
+				// check if the instancegroup exists already
+				igName := v.ObjectMeta.Name
+				ig, err := clientset.InstanceGroupsFor(cluster).Get(igName, metav1.GetOptions{})
 				if err != nil {
-					return fmt.Errorf("error replacing instanceGroup: %v", err)
+					if errors.IsNotFound(err) {
+						if !c.force {
+							return fmt.Errorf("instanceGroup: %v does not exist (try adding --force flag)", igName)
+						}
+					} else {
+						return fmt.Errorf("unable to check for instanceGroup: %v", err)
+					}
 				}
-
+				switch ig {
+				case nil:
+					glog.Infof("instanceGroup: %v was not found, creating resource now", igName)
+					_, err = clientset.InstanceGroupsFor(cluster).Create(v)
+					if err != nil {
+						return fmt.Errorf("error creating instanceGroup: %v", err)
+					}
+				default:
+					_, err = clientset.InstanceGroupsFor(cluster).Update(v)
+					if err != nil {
+						return fmt.Errorf("error replacing instanceGroup: %v", err)
+					}
+				}
 			default:
 				glog.V(2).Infof("Type of object was %T", v)
 				return fmt.Errorf("Unhandled kind %q in %q", gvk, f)
 			}
-
 		}
 	}
 

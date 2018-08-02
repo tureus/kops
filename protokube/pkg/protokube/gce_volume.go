@@ -19,6 +19,7 @@ package protokube
 import (
 	"fmt"
 	"net"
+	"os"
 	"strings"
 
 	"cloud.google.com/go/compute/metadata"
@@ -26,6 +27,7 @@ import (
 	"golang.org/x/net/context"
 	"golang.org/x/oauth2/google"
 	compute "google.golang.org/api/compute/v0.beta"
+	"k8s.io/kops/protokube/pkg/etcd"
 	"k8s.io/kops/protokube/pkg/gossip"
 	gossipgce "k8s.io/kops/protokube/pkg/gossip/gce"
 	"k8s.io/kops/upup/pkg/fi/cloudup/gce"
@@ -75,7 +77,7 @@ func (a *GCEVolumes) ClusterID() string {
 	return a.clusterName
 }
 
-// ClusterID returns the current GCE project
+// Project returns the current GCE project
 func (a *GCEVolumes) Project() string {
 	return a.project
 }
@@ -208,7 +210,7 @@ func (v *GCEVolumes) buildGCEVolume(d *compute.Disk) (*Volume, error) {
 				if err != nil {
 					return nil, fmt.Errorf("Error decoding GCE label: %s=%q", k, v)
 				}
-				spec, err := ParseEtcdClusterSpec(etcdClusterName, value)
+				spec, err := etcd.ParseEtcdClusterSpec(etcdClusterName, value)
 				if err != nil {
 					return nil, fmt.Errorf("error parsing etcd cluster label %q on volume %q: %v", value, volumeName, err)
 				}
@@ -237,7 +239,7 @@ func (v *GCEVolumes) FindVolumes() ([]*Volume, error) {
 
 			diskClusterName := d.Labels[gce.GceLabelNameKubernetesCluster]
 			if diskClusterName == "" {
-				glog.V(2).Infof("Skipping disk %q with no cluster name", d.Name)
+				glog.V(4).Infof("Skipping disk %q with no cluster name", d.Name)
 				continue
 			}
 			// Note that the cluster name is _not_ encoded with EncodeGCELabel
@@ -307,6 +309,20 @@ func (v *GCEVolumes) FindVolumes() ([]*Volume, error) {
 	//}
 
 	return volumes, nil
+}
+
+// FindMountedVolume implements Volumes::FindMountedVolume
+func (v *GCEVolumes) FindMountedVolume(volume *Volume) (string, error) {
+	device := volume.LocalDevice
+
+	_, err := os.Stat(pathFor(device))
+	if err == nil {
+		return device, nil
+	}
+	if os.IsNotExist(err) {
+		return "", nil
+	}
+	return "", fmt.Errorf("error checking for device %q: %v", device, err)
 }
 
 // AttachVolume attaches the specified volume to this instance, returning the mountpoint & nil if successful

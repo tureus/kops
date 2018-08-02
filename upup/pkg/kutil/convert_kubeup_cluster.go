@@ -29,7 +29,7 @@ import (
 	"k8s.io/kops/pkg/apis/kops/registry"
 	"k8s.io/kops/pkg/assets"
 	"k8s.io/kops/pkg/client/simple"
-	"k8s.io/kops/pkg/resources"
+	awsresources "k8s.io/kops/pkg/resources/aws"
 	"k8s.io/kops/upup/pkg/fi"
 	"k8s.io/kops/upup/pkg/fi/cloudup"
 	"k8s.io/kops/upup/pkg/fi/cloudup/awsup"
@@ -64,7 +64,7 @@ func (x *ConvertKubeupCluster) Upgrade() error {
 		return fmt.Errorf("OldClusterName must be specified")
 	}
 
-	oldKeyStore, err := registry.KeyStore(cluster)
+	oldKeyStore, err := x.Clientset.KeyStore(cluster)
 	if err != nil {
 		return err
 	}
@@ -83,7 +83,7 @@ func (x *ConvertKubeupCluster) Upgrade() error {
 	}
 	cluster.Spec.ConfigBase = newConfigBase.Path()
 
-	newKeyStore, err := registry.KeyStore(cluster)
+	newKeyStore, err := x.Clientset.KeyStore(cluster)
 	if err != nil {
 		return err
 	}
@@ -106,8 +106,8 @@ func (x *ConvertKubeupCluster) Upgrade() error {
 		delete(cluster.ObjectMeta.Annotations, api.AnnotationNameManagement)
 	}
 
-	assetBuilder := assets.NewAssetBuilder()
-	fullCluster, err := cloudup.PopulateClusterSpec(cluster, assetBuilder)
+	assetBuilder := assets.NewAssetBuilder(cluster, "")
+	fullCluster, err := cloudup.PopulateClusterSpec(x.Clientset, cluster, assetBuilder)
 	if err != nil {
 		return err
 	}
@@ -118,37 +118,37 @@ func (x *ConvertKubeupCluster) Upgrade() error {
 		return fmt.Errorf("error finding instances: %v", err)
 	}
 
-	subnets, err := resources.DescribeSubnets(x.Cloud)
+	subnets, err := awsresources.DescribeSubnets(x.Cloud)
 	if err != nil {
 		return fmt.Errorf("error finding subnets: %v", err)
 	}
 
-	securityGroups, err := resources.DescribeSecurityGroups(x.Cloud)
+	securityGroups, err := awsresources.DescribeSecurityGroups(x.Cloud, x.OldClusterName)
 	if err != nil {
 		return fmt.Errorf("error finding security groups: %v", err)
 	}
 
-	volumes, err := resources.DescribeVolumes(x.Cloud)
+	volumes, err := awsresources.DescribeVolumes(x.Cloud)
 	if err != nil {
 		return err
 	}
 
-	dhcpOptions, err := resources.DescribeDhcpOptions(x.Cloud)
+	dhcpOptions, err := awsresources.DescribeDhcpOptions(x.Cloud)
 	if err != nil {
 		return err
 	}
 
-	routeTables, err := resources.DescribeRouteTables(x.Cloud)
+	routeTables, err := awsresources.DescribeRouteTables(x.Cloud, oldClusterName)
 	if err != nil {
 		return err
 	}
 
-	autoscalingGroups, err := resources.FindAutoscalingGroups(awsCloud, oldTags)
+	autoscalingGroups, err := awsup.FindAutoscalingGroups(awsCloud, oldTags)
 	if err != nil {
 		return err
 	}
 
-	elbs, _, err := resources.DescribeELBs(x.Cloud)
+	elbs, _, err := awsresources.DescribeELBs(x.Cloud)
 	if err != nil {
 		return err
 	}
@@ -306,7 +306,7 @@ func (x *ConvertKubeupCluster) Upgrade() error {
 		}
 
 		if retagGateway {
-			gateways, err := resources.DescribeInternetGatewaysIgnoreTags(x.Cloud)
+			gateways, err := awsresources.DescribeInternetGatewaysIgnoreTags(x.Cloud)
 			if err != nil {
 				return fmt.Errorf("error listing gateways: %v", err)
 			}
@@ -471,7 +471,7 @@ func (x *ConvertKubeupCluster) Upgrade() error {
 	}
 
 	// TODO: No longer needed?
-	err = registry.WriteConfigDeprecated(newConfigBase.Join(registry.PathClusterCompleted), fullCluster)
+	err = registry.WriteConfigDeprecated(cluster, newConfigBase.Join(registry.PathClusterCompleted), fullCluster)
 	if err != nil {
 		return fmt.Errorf("error writing completed cluster spec: %v", err)
 	}
@@ -480,7 +480,7 @@ func (x *ConvertKubeupCluster) Upgrade() error {
 		return fmt.Errorf("error writing completed cluster spec: %v", err)
 	}
 
-	oldCACertPool, err := oldKeyStore.CertificatePool(fi.CertificateId_CA)
+	oldCACertPool, err := oldKeyStore.CertificatePool(fi.CertificateId_CA, true)
 	if err != nil {
 		return fmt.Errorf("error reading old CA certs: %v", err)
 	}

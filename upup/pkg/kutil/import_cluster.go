@@ -31,7 +31,8 @@ import (
 	"k8s.io/kops/pkg/apis/kops"
 	"k8s.io/kops/pkg/apis/kops/registry"
 	"k8s.io/kops/pkg/client/simple"
-	"k8s.io/kops/pkg/resources"
+	"k8s.io/kops/pkg/pki"
+	awsresources "k8s.io/kops/pkg/resources/aws"
 	"k8s.io/kops/upup/pkg/fi"
 	"k8s.io/kops/upup/pkg/fi/cloudup"
 	"k8s.io/kops/upup/pkg/fi/cloudup/awsup"
@@ -149,7 +150,7 @@ func (x *ImportCluster) ImportAWSCluster() error {
 	masterInstanceGroups := []*kops.InstanceGroup{masterGroup}
 	instanceGroups = append(instanceGroups, masterGroup)
 
-	awsSubnets, err := resources.DescribeSubnets(x.Cloud)
+	awsSubnets, err := awsresources.DescribeSubnets(x.Cloud)
 	if err != nil {
 		return fmt.Errorf("error finding subnets: %v", err)
 	}
@@ -290,7 +291,7 @@ func (x *ImportCluster) ImportAWSCluster() error {
 	//}
 
 	{
-		groups, err := resources.FindAutoscalingGroups(awsCloud, awsCloud.Tags())
+		groups, err := awsup.FindAutoscalingGroups(awsCloud, awsCloud.Tags())
 		if err != nil {
 			return fmt.Errorf("error listing autoscaling groups: %v", err)
 		}
@@ -317,7 +318,7 @@ func (x *ImportCluster) ImportAWSCluster() error {
 		// Determine the machine type
 		for _, group := range groups {
 			name := aws.StringValue(group.LaunchConfigurationName)
-			launchConfiguration, err := resources.FindAutoscalingLaunchConfiguration(awsCloud, name)
+			launchConfiguration, err := awsresources.FindAutoscalingLaunchConfiguration(awsCloud, name)
 			if err != nil {
 				return fmt.Errorf("error finding autoscaling LaunchConfiguration %q: %v", name, err)
 			}
@@ -413,7 +414,7 @@ func (x *ImportCluster) ImportAWSCluster() error {
 
 	//b.Context = "aws_" + instancePrefix
 
-	keyStore, err := registry.KeyStore(cluster)
+	keyStore, err := x.Clientset.KeyStore(cluster)
 	if err != nil {
 		return err
 	}
@@ -622,7 +623,7 @@ func parseInt(s string) (int, error) {
 //}
 
 func findInstances(c awsup.AWSCloud) ([]*ec2.Instance, error) {
-	filters := resources.BuildEC2Filters(c)
+	filters := awsresources.BuildEC2Filters(c)
 
 	request := &ec2.DescribeInstancesInput{
 		Filters: filters,
@@ -714,7 +715,7 @@ func (u *UserDataConfiguration) ParseBool(key string) *bool {
 	return fi.Bool(false)
 }
 
-func (u *UserDataConfiguration) ParseCert(key string) (*fi.Certificate, error) {
+func (u *UserDataConfiguration) ParseCert(key string) (*pki.Certificate, error) {
 	s := u.Settings[key]
 	if s == "" {
 		return nil, nil
@@ -724,7 +725,7 @@ func (u *UserDataConfiguration) ParseCert(key string) (*fi.Certificate, error) {
 	if err != nil {
 		return nil, fmt.Errorf("error decoding base64 certificate %q: %v", key, err)
 	}
-	cert, err := fi.LoadPEMCertificate(data)
+	cert, err := pki.ParsePEMCertificate(data)
 	if err != nil {
 		return nil, fmt.Errorf("error parsing certificate %q: %v", key, err)
 	}
@@ -732,7 +733,7 @@ func (u *UserDataConfiguration) ParseCert(key string) (*fi.Certificate, error) {
 	return cert, nil
 }
 
-func (u *UserDataConfiguration) ParseKey(key string) (*fi.PrivateKey, error) {
+func (u *UserDataConfiguration) ParseKey(key string) (*pki.PrivateKey, error) {
 	s := u.Settings[key]
 	if s == "" {
 		return nil, nil
@@ -742,7 +743,7 @@ func (u *UserDataConfiguration) ParseKey(key string) (*fi.PrivateKey, error) {
 	if err != nil {
 		return nil, fmt.Errorf("error decoding base64 private key %q: %v", key, err)
 	}
-	k, err := fi.ParsePEMPrivateKey(data)
+	k, err := pki.ParsePEMPrivateKey(data)
 	if err != nil {
 		return nil, fmt.Errorf("error parsing private key %q: %v", key, err)
 	}

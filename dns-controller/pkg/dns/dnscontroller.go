@@ -28,9 +28,9 @@ import (
 	"sync/atomic"
 
 	"k8s.io/kops/dns-controller/pkg/util"
-	"k8s.io/kubernetes/federation/pkg/dnsprovider"
-	k8scoredns "k8s.io/kubernetes/federation/pkg/dnsprovider/providers/coredns"
-	"k8s.io/kubernetes/federation/pkg/dnsprovider/rrstype"
+	"k8s.io/kops/dnsprovider/pkg/dnsprovider"
+	k8scoredns "k8s.io/kops/dnsprovider/pkg/dnsprovider/providers/coredns"
+	"k8s.io/kops/dnsprovider/pkg/dnsprovider/rrstype"
 )
 
 var zoneListCacheValidity = time.Minute * 15
@@ -503,6 +503,10 @@ func isCoreDNSZone(zone dnsprovider.Zone) bool {
 	return ok
 }
 
+func FixWildcards(s string) string {
+	return strings.Replace(s, "\\052", "*", 1)
+}
+
 func (o *dnsOp) updateRecords(k recordKey, newRecords []string, ttl int64) error {
 	fqdn := EnsureDotSuffix(k.FQDN)
 
@@ -539,7 +543,7 @@ func (o *dnsOp) updateRecords(k recordKey, newRecords []string, ttl int64) error
 		}
 
 		for _, rr := range rrs {
-			rrName := EnsureDotSuffix(rr.Name())
+			rrName := EnsureDotSuffix(FixWildcards(rr.Name()))
 			if rrName != fqdn {
 				glog.V(8).Infof("Skipping record %q (name != %s)", rrName, fqdn)
 				continue
@@ -563,14 +567,9 @@ func (o *dnsOp) updateRecords(k recordKey, newRecords []string, ttl int64) error
 		return err
 	}
 
-	if existing != nil {
-		glog.V(2).Infof("will replace existing dns record %s %s", existing.Type(), existing.Name())
-		cs.Remove(existing)
-	}
-
 	glog.V(2).Infof("Adding DNS changes to batch %s %s", k, newRecords)
 	rr := rrsProvider.New(fqdn, newRecords, ttl, rrstype.RrsType(k.RecordType))
-	cs.Add(rr)
+	cs.Upsert(rr)
 
 	return nil
 }
@@ -610,6 +609,18 @@ func (s *DNSControllerScope) Replace(recordName string, records []Record) {
 
 	glog.V(2).Infof("Update desired state: %s/%s: %v", s.ScopeName, recordName, records)
 	s.parent.recordChange()
+}
+
+// AllKeys implements Scope::AllKeys, returns all the keys in the current scope
+func (s *DNSControllerScope) AllKeys() []string {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	var keys []string
+	for k := range s.Records {
+		keys = append(keys, k)
+	}
+	return keys
 }
 
 // recordsSliceEquals compares two []Record

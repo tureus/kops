@@ -18,6 +18,7 @@ package registry
 
 import (
 	"fmt"
+
 	api "k8s.io/kops/pkg/apis/kops"
 	"k8s.io/kops/pkg/client/simple"
 )
@@ -37,7 +38,7 @@ func CreateClusterConfig(clientset simple.Clientset, cluster *api.Cluster, group
 		}
 	}
 
-	_, err := clientset.ClustersFor(cluster).Create(cluster)
+	_, err := clientset.CreateCluster(cluster)
 	if err != nil {
 		return err
 	}

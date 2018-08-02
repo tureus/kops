@@ -2,6 +2,17 @@
 
 This document also applies to using the `kops` API to customize a Kubernetes cluster with or without using YAML or JSON.
 
+## Table of Contents
+
+   * [Using A Manifest to Manage kops Clusters](#using-a-manifest-to-manage-kops-clusters)
+   * [Background](#background)
+   * [Exporting a Cluster](#exporting-a-cluster)
+   * [YAML Examples](#yaml-examples)
+   * [Further References](#further-references)
+   * [Cluster Spec](#cluster-spec)
+   * [Instance Groups](#instance-groups)
+   * [Closing Thoughts](#closing-thoughts)
+
 ## Background
 
 > We like to think of it as `kubectl` for Clusters.
@@ -15,7 +26,7 @@ The following is a list of the benefits of using a file to manage instances.
 - Capability to access API values that are not accessible via the command line such as setting the max price for spot instances.
 - Create, replace, update, and delete clusters without entering an interactive editor. This feature is helpful when automating cluster creation.
 - Ability to check-in files to source control that represents an installation.
-- Run commands such as `kops delete -f mycuster.yaml`.
+- Run commands such as `kops delete -f mycluster.yaml`.
 
 ## Exporting a Cluster
 
@@ -34,16 +45,14 @@ export KOPS_STATE_STORE=s3://example-state-store
     --node-size m4.xlarge \
     --kubernetes-version v1.6.6 \
     --master-size m4.large \
-    --vpc vpc-6335dd1a
-```
-
-The next step is to export the configuration to a YAML document. `kops` has a command that allows the export in a single YAML document, but since JSON files need to separate documents, we only export YAML with a single command. You can export JSON with multiple commands.
-
-```shell
-kops get $NAME -o yaml > $NAME.yaml
+    --vpc vpc-6335dd1a \
+    --dry-run \
+    -o yaml > $NAME.yaml
 ```
 
 The above command exports a YAML document which contains the definition of the cluster, `kind: Cluster`, and the definitions of the instance groups, `kind: InstanceGroup`.
+
+NOTE: If you run `kops get cluster $NAME -o yaml > $NAME.yaml`, you will only get a cluster spec. Use the command above (`kops get $NAME ...`)for both the cluster spec and all instance groups.
 
 The following is the contents of the exported YAML file.
 
@@ -222,14 +231,6 @@ spec:
   - us-east-2c
 ```
 
-Next, delete the cluster from the state store. (**Note:** An alternative to deleting and then creating again from the new manifest might be to replace with `kops replace -f $NAME.yaml`)
-
-```console
-kops delete -f $NAME.yaml
-# validate that you want to remove the cluster
-kops delete -f $NAME.yaml --yes
-```
-
 ## YAML Examples
 
 With the above YAML file, a user can add configurations that are not available via the command line. For instance, you can add a `MaxPrice` value to a new instance group and use spot instances. Also add node and cloud labels for the new instance group.
@@ -307,7 +308,7 @@ More information about some of the elements in the `ClusterSpec` is available in
 - [Ectd Encryption](etcd_backup.md)
 - [GPU](gpu.md) setup
 - [IAM Roles](iam_roles.md) - adding additional IAM roles.
-- [Labels](lables.md)
+- [Labels](labels.md)
 - [Run In Existing VPC](run_in_existing_vpc.md)
 
 To access the full configuration that a `kops` installation is running execute:

@@ -21,26 +21,26 @@ import (
 
 	"github.com/spf13/cobra"
 	"k8s.io/kops/cmd/kops/util"
-	"k8s.io/kops/pkg/apis/kops/registry"
+	"k8s.io/kops/pkg/commands"
 	"k8s.io/kops/pkg/kubeconfig"
 	"k8s.io/kops/upup/pkg/fi"
 	"k8s.io/kubernetes/pkg/kubectl/cmd/templates"
-	"k8s.io/kubernetes/pkg/util/i18n"
+	"k8s.io/kubernetes/pkg/kubectl/util/i18n"
 )
 
 var (
-	export_kubecfg_long = templates.LongDesc(i18n.T(`
+	exportKubecfgLong = templates.LongDesc(i18n.T(`
 	Export a kubecfg file for a cluster from the state store. The configuration
 	will be saved into a users $HOME/.kube/config file.
 	To export the kubectl configuration to a specific file set the KUBECONFIG
 	environment variable.`))
 
-	export_kubecfg_example = templates.Examples(i18n.T(`
+	exportKubecfgExample = templates.Examples(i18n.T(`
 	# export a kubecfg file
 	kops export kubecfg kubernetes-cluster.example.com
 		`))
 
-	export_kubecfg_short = i18n.T(`Export kubecfg.`)
+	exportKubecfgShort = i18n.T(`Export kubecfg.`)
 )
 
 type ExportKubecfgOptions struct {
@@ -53,9 +53,9 @@ func NewCmdExportKubecfg(f *util.Factory, out io.Writer) *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:     "kubecfg CLUSTERNAME",
-		Short:   export_kubecfg_short,
-		Long:    export_kubecfg_long,
-		Example: export_kubecfg_example,
+		Short:   exportKubecfgShort,
+		Long:    exportKubecfgLong,
+		Example: exportKubecfgExample,
 		Run: func(cmd *cobra.Command, args []string) {
 			err := RunExportKubecfg(f, out, options, args)
 			if err != nil {
@@ -73,22 +73,27 @@ func RunExportKubecfg(f *util.Factory, out io.Writer, options *ExportKubecfgOpti
 		return err
 	}
 
+	clientset, err := rootCommand.Clientset()
+	if err != nil {
+		return err
+	}
+
 	cluster, err := rootCommand.Cluster()
 	if err != nil {
 		return err
 	}
 
-	keyStore, err := registry.KeyStore(cluster)
+	keyStore, err := clientset.KeyStore(cluster)
 	if err != nil {
 		return err
 	}
 
-	secretStore, err := registry.SecretStore(cluster)
+	secretStore, err := clientset.SecretStore(cluster)
 	if err != nil {
 		return err
 	}
 
-	conf, err := kubeconfig.BuildKubecfg(cluster, keyStore, secretStore, &cloudDiscoveryStatusStore{})
+	conf, err := kubeconfig.BuildKubecfg(cluster, keyStore, secretStore, &commands.CloudDiscoveryStatusStore{})
 	if err != nil {
 		return err
 	}

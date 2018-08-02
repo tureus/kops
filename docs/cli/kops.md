@@ -22,8 +22,8 @@ kops helps you create, destroy, upgrade and maintain production-grade, highly av
       --log_backtrace_at traceLocation   when logging hits line file:N, emit a stack trace (default :0)
       --log_dir string                   If non-empty, write log files in this directory
       --logtostderr                      log to standard error instead of files (default false)
-      --name string                      Name of cluster
-      --state string                     Location of state storage
+      --name string                      Name of cluster. Overrides KOPS_CLUSTER_NAME environment variable
+      --state string                     Location of state storage. Overrides KOPS_STATE_STORE environment variable
       --stderrthreshold severity         logs at or above this threshold go to stderr (default 2)
   -v, --v Level                          log level for V logs
       --vmodule moduleSpec               comma-separated list of pattern=N settings for file-filtered logging
@@ -40,6 +40,7 @@ kops helps you create, destroy, upgrade and maintain production-grade, highly av
 * [kops import](kops_import.md)	 - Import a cluster.
 * [kops replace](kops_replace.md)	 - Replace cluster resources.
 * [kops rolling-update](kops_rolling-update.md)	 - Rolling update a cluster.
+* [kops set](kops_set.md)	 - Set fields on clusters and other resources.
 * [kops toolbox](kops_toolbox.md)	 - Misc infrequently used commands.
 * [kops update](kops_update.md)	 - Update a cluster.
 * [kops upgrade](kops_upgrade.md)	 - Upgrade a kubernetes cluster.

@@ -25,8 +25,8 @@ Misc infrequently used commands.
       --log_backtrace_at traceLocation   when logging hits line file:N, emit a stack trace (default :0)
       --log_dir string                   If non-empty, write log files in this directory
       --logtostderr                      log to standard error instead of files (default false)
-      --name string                      Name of cluster
-      --state string                     Location of state storage
+      --name string                      Name of cluster. Overrides KOPS_CLUSTER_NAME environment variable
+      --state string                     Location of state storage. Overrides KOPS_STATE_STORE environment variable
       --stderrthreshold severity         logs at or above this threshold go to stderr (default 2)
   -v, --v Level                          log level for V logs
       --vmodule moduleSpec               comma-separated list of pattern=N settings for file-filtered logging
@@ -34,6 +34,8 @@ Misc infrequently used commands.
 
 ### SEE ALSO
 * [kops](kops.md)	 - kops is Kubernetes ops.
+* [kops toolbox bundle](kops_toolbox_bundle.md)	 - Bundle cluster information
 * [kops toolbox convert-imported](kops_toolbox_convert-imported.md)	 - Convert an imported cluster into a kops cluster.
 * [kops toolbox dump](kops_toolbox_dump.md)	 - Dump cluster information
+* [kops toolbox template](kops_toolbox_template.md)	 - Generate cluster.yaml from template
 

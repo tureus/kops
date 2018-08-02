@@ -2,9 +2,9 @@
 
 Kubernetes Operations (kops) currently supports 4 networking modes:
 
-* `kubenet` kubernetes native networking via a CNI plugin.  This is the default.
+* `kubenet` Kubernetes native networking via a CNI plugin.  This is the default.
 * `cni` Container Network Interface(CNI) style networking, often installed via a Daemonset.
-* `classic` kubernetes native networking, done in-process.
+* `classic` Kubernetes native networking, done in-process.
 * `external` networking is done via a Daemonset. This is used in some custom implementations.
 
 ### kops Default Networking
@@ -17,7 +17,7 @@ One important limitation when using `kubenet` networking is that an AWS routing 
 50 entries, which sets a limit of 50 nodes per cluster. AWS support will sometimes raise the limit to 100,
 but their documentation notes that routing tables over 50 may take a performance hit.
 
-Because k8s modifies the AWS routing table, this means that realistically kubernetes needs to own the
+Because k8s modifies the AWS routing table, this means that realistically Kubernetes needs to own the
 routing table, and thus it requires its own subnet.  It is theoretically possible to share a routing table
 with other infrastructure (but not a second cluster!), but this is not really recommended.  Certain
 `cni` networking solutions claim to address these problems.
@@ -28,14 +28,20 @@ and NAT gateways are single AZ, multiple route tables are needed to use each NAT
 
 ### Supported CNI Networking
 
-Several different providers are currently built into kops:
+[Container Network Interface](https://github.com/containernetworking/cni)  provides a specification
+and libraries for writing plugins to configure network interfaces in Linux containers.  Kubernetes
+has built in support for CNI networking components.
+
+Several different CNI providers are currently built into kops:
 
 * [Calico](http://docs.projectcalico.org/v2.0/getting-started/kubernetes/installation/hosted/)
 * [Canal (Flannel + Calico)](https://github.com/projectcalico/canal)
-* [flannel](https://github.com/coreos/flannel)
+* [flannel](https://github.com/coreos/flannel) - use `--networking flannel-vxlan` (recommended) or `--networking flannel-udp` (legacy).  `--networking flannel` now selects `flannel-vxlan`.
 * [kopeio-vxlan](https://github.com/kopeio/networking)
-* [kube-router](https://github.com/cloudnativelabs/kube-router)
+* [kube-router](./networking.md#kube-router-example-for-cni-ipvs-based-service-proxy-and-network-policy-enforcer)
+* [romana](https://github.com/romana/romana)
 * [weave](https://github.com/weaveworks/weave-kube)
+* [amazon-vpc-routed-eni](./networking.md#amazon-vpc-backend)
 
 The manifests for the providers are included with kops, and you simply use `--networking provider-name`.
 Replace the provider name with the names listed above with you `kops cluster create`.  For instance
@@ -45,18 +51,7 @@ to install `kopeio-vxlan` execute the following:
 $ kops create cluster --networking kopeio-vxlan
 ```
 
-### CNI Networking
-
-[Container Network Interface](https://github.com/containernetworking/cni)  provides a specification
-and libraries for writing plugins to configure network interfaces in Linux containers.  Kubernetes
-has built in support for CNI networking components.  Various solutions exist that
-support Kubernetes CNI networking, listed in alphabetical order:
-
-- [Romana](https://github.com/romana/romana/tree/master/containerize#using-kops)
-
-This is not an all comprehensive list. At the time of writing this documentation, weave has
-been tested and used in the example below.  This project has no bias over the CNI provider
-that you run, we care that we provide the correct setup to run CNI providers.
+This project has no bias over the CNI provider that you run, we care that we provide the correct setup to run CNI providers.
 
 Both `kubenet` and `classic` networking options are completely baked into kops, while since
 CNI networking providers are not part of the Kubernetes project, we do not maintain
@@ -152,7 +147,7 @@ This full node-to-node mesh per L2 network has its scaling challenges for larger
 BGP route reflectors can be used as a replacement to a full mesh, and is useful for scaling up a cluster.
 The setup of BGP route reflectors is currently out of the scope of kops.
 
-Read more here: [BGP route reflectors](http://docs.projectcalico.org/v2.2/usage/routereflector/calico-routereflector)
+Read more here: [BGP route reflectors](http://docs.projectcalico.org/latest/usage/routereflector/calico-routereflector)
 
 
 To enable this mode in a cluster, with Calico as the CNI and Network Policy provider, you must edit the cluster after the previous `kops create ...` command.
@@ -183,7 +178,7 @@ Only the masters have the IAM policy (`ec2:*`) to allow k8s-ec2-srcdst to execut
 
 #### More information about Calico
 
-For Calico specific documentation please visit the [Calico Docs](http://docs.projectcalico.org/v2.0/getting-started/kubernetes/).
+For Calico specific documentation please visit the [Calico Docs](http://docs.projectcalico.org/latest/getting-started/kubernetes/).
 
 #### Getting help with Calico
 
@@ -196,9 +191,17 @@ For help with Calico or to report any issues:
 
 Calico currently uses etcd as a backend for storing information about workloads and policies.  Calico does not interfere with normal etcd operations and does not require special handling when upgrading etcd.  For more information please visit the [etcd Docs](https://coreos.com/etcd/docs/latest/)
 
+#### Calico troubleshooting
+##### New nodes are taking minutes for syncing ip routes and new pods on them can't reach kubedns
+This is caused by nodes in the Calico etcd nodestore no longer existing. Due to the ephemeral nature of AWS EC2 instances, new nodes are brought up with different hostnames, and nodes that are taken offline remain in the Calico nodestore. This is unlike most datacentre deployments where the hostnames are mostly static in a cluster. Read more about this issue at https://github.com/kubernetes/kops/issues/3224
+This has been solved in kops 1.9.0, when creating a new cluster no action is needed, but if the cluster was created with a prior kops version the following actions should be taken:
+  * Use kops to update the cluster ```kops update cluster <name> --yes``` and wait for calico-kube-controllers deployment and calico-node daemonset pods to be updated
+  * Decommission all invalid nodes, [see here](https://docs.projectcalico.org/v2.6/usage/decommissioning-a-node)
+  * All nodes that are deleted from the cluster after this actions should be cleaned from calico's etcd storage and the delay programming routes should be solved.
+
 ### Canal Example for CNI and Network Policy
 
-Canal is a project that combines [Flannel](https://github.com/coreos/flannel) and [Calico](http://docs.projectcalico.org/v2.0/getting-started/kubernetes/installation/hosted/) for CNI Networking.  It uses Flannel for networking pod traffic between hosts via VXLAN and Calico for network policy enforcement and pod to pod traffic.
+Canal is a project that combines [Flannel](https://github.com/coreos/flannel) and [Calico](http://docs.projectcalico.org/latest/getting-started/kubernetes/installation/hosted/) for CNI Networking.  It uses Flannel for networking pod traffic between hosts via VXLAN and Calico for network policy enforcement and pod to pod traffic.
 
 #### Installing Canal on a new Cluster
 
@@ -254,11 +257,77 @@ $ kops create cluster \
   --name myclustername.mydns.io
 ```
 
-Currently kube-router supports 1.6 and above. Please note that kube-router will also provide service proxy, so kube-proxy will not be deployed in to the cluster. Kube-router used node routing stack for cross node pod-to-pod connectivity with out any encapsulation. In the case of AWS, EC2 instances have source/destination checks enabled by default. So please ensure to turn off source-destination checks on the AWS EC2 instances by running below command.
+Currently kube-router supports 1.6 and above. Please note that kube-router will also provide service proxy, so kube-proxy will not be deployed in to the cluster.
 
+No additional configurations are required to be done by user. Kube-router automatically disables source-destination check on all AWS EC2 instances. For the traffic within a subnet there is no overlay or tunneling used. For cross-subnet pod traffic ip-ip tunneling is used implicitly and no configuration is required. 
+
+### Romana Example for CNI
+
+#### Installing Romana on a new Cluster
+
+The following command sets up a cluster with Romana as the CNI.
+
+```console
+$ export $ZONES=mylistofzones
+$ kops create cluster \
+  --zones $ZONES \
+  --master-zones $ZONES \
+  --master-size m4.large \
+  --node-size m4.large \
+  --networking romana \
+  --yes \
+  --name myclustername.mydns.io
 ```
-aws ec2 modify-instance-attribute --instance-id <ec2 instance id> --no-source-dest-check
+
+Currently Romana supports Kubernetes 1.6 and above.
+
+#### Getting help with Romana
+
+For problems with deploying Romana please post an issue to Github:
+
+- [Romana Issues](https://github.com/romana/romana/issues)
+
+You can also contact the Romana team on Slack
+
+- [Romana Slack](https://romana.slack.com) (invite required - email [info@romana.io](mailto:info@romana.io))
+
+#### Romana Backend
+
+Romana uses the cluster's etcd as a backend for storing information about routes, hosts, host-groups and IP allocations.
+This does not affect normal etcd operations or require special treatment when upgrading etcd.
+The etcd port (4001) is opened between masters and nodes when using this networking option.
+
+#### Amazon VPC Backend
+
+The [Amazon VPC CNI](https://github.com/aws/amazon-vpc-cni-k8s) plugin
+requires no additional configurations to be done by user. 
+
+**Important:** the pods uses the VPC CIDR, i.e. there is no isolation between the master, node/s and the internal k8s network.
+
+**Note:** The following permissions are added to all nodes by kops to run the provider:
+
+```json
+  {
+    "Sid": "kopsK8sEC2NodeAmazonVPCPerms",
+    "Effect": "Allow",
+    "Action": [
+      "ec2:CreateNetworkInterface",
+      "ec2:AttachNetworkInterface",
+      "ec2:DeleteNetworkInterface",
+      "ec2:DetachNetworkInterface",
+      "ec2:DescribeNetworkInterfaces",
+      "ec2:DescribeInstances",
+      "ec2:ModifyNetworkInterfaceAttribute",
+      "ec2:AssignPrivateIpAddresses",
+      "tag:TagResources"
+    ],
+    "Resource": [
+      "*"
+    ]
+  }
 ```
+
+In case of any issues the directory `/var/log/aws-routed-eni` contains the log files of the CNI plugin. This directory is located in all the nodes in the cluster.
 
 ### Validating CNI Installation
 

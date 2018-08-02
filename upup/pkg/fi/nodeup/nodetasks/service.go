@@ -26,11 +26,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/golang/glog"
 	"k8s.io/kops/upup/pkg/fi"
 	"k8s.io/kops/upup/pkg/fi/nodeup/cloudinit"
 	"k8s.io/kops/upup/pkg/fi/nodeup/local"
 	"k8s.io/kops/upup/pkg/fi/nodeup/tags"
+
+	"github.com/golang/glog"
 )
 
 const (
@@ -239,7 +240,7 @@ func getSystemdDependencies(serviceName string, definition string) ([]string, er
 			// We extract the first argument (only)
 			tokens := strings.SplitN(v, " ", 2)
 			dependencies = append(dependencies, tokens[0])
-			glog.V(2).Infof("extracted depdendency from %q: %q", line, tokens[0])
+			glog.V(2).Infof("extracted dependency from %q: %q", line, tokens[0])
 		}
 	}
 	return dependencies, nil

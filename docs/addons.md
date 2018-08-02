@@ -16,7 +16,7 @@ The [dashboard project](https://github.com/kubernetes/dashboard) provides a nice
 
 Install using:
 ```
-kubectl create -f https://raw.githubusercontent.com/kubernetes/kops/master/addons/kubernetes-dashboard/v1.6.1.yaml
+kubectl create -f https://raw.githubusercontent.com/kubernetes/kops/master/addons/kubernetes-dashboard/v1.8.1.yaml
 ```
 
 And then navigate to `https://api.<clustername>/ui`
@@ -57,7 +57,7 @@ Monitoring supports the horizontal pod autoscaler.
 
 Install using:
 ```
-kubectl create -f https://raw.githubusercontent.com/kubernetes/kops/master/addons/monitoring-standalone/v1.6.0.yaml
+kubectl create -f https://raw.githubusercontent.com/kubernetes/kops/master/addons/monitoring-standalone/v1.7.0.yaml
 ```
 
 
@@ -73,7 +73,7 @@ to ELB-backed `LoadBalancer` services created by Kubernetes. Install using:
 
 The project is created by wearemolecule, and maintained at
 [wearemolecule/route53-kubernetes](https://github.com/wearemolecule/route53-kubernetes).
-[Usage instructions](addons/route53-mapper/README.md)
+[Usage instructions](https://github.com/kubernetes/kops/blob/master/addons/route53-mapper/README.md)
 
 ```
 kubectl apply -f https://raw.githubusercontent.com/kubernetes/kops/master/addons/route53-mapper/v1.3.0.yml

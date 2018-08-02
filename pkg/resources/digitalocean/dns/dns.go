@@ -17,20 +17,66 @@ limitations under the License.
 package dns
 
 import (
+	"errors"
 	"fmt"
-	"io/ioutil"
-	"net/http"
+	"io"
+	"os"
+	"strings"
 
 	"github.com/digitalocean/godo"
 	"github.com/digitalocean/godo/context"
 
 	"github.com/golang/glog"
 
-	"k8s.io/kubernetes/federation/pkg/dnsprovider"
-	"k8s.io/kubernetes/federation/pkg/dnsprovider/rrstype"
+	"golang.org/x/oauth2"
+
+	"k8s.io/kops/dns-controller/pkg/dns"
+	"k8s.io/kops/dnsprovider/pkg/dnsprovider"
+	"k8s.io/kops/dnsprovider/pkg/dnsprovider/rrstype"
 )
 
-const ipPlaceholder = "203.0.113.123"
+const (
+	ipPlaceholder = "203.0.113.123"
+	providerName  = "digitalocean"
+)
+
+func init() {
+	dnsprovider.RegisterDnsProvider(providerName, func(config io.Reader) (dnsprovider.Interface, error) {
+		client, err := newClient()
+		if err != nil {
+			return nil, err
+		}
+
+		return NewProvider(client), nil
+	})
+}
+
+// TokenSource implements oauth2.TokenSource
+type TokenSource struct {
+	AccessToken string
+}
+
+// Token() returns oauth2.Token
+func (t *TokenSource) Token() (*oauth2.Token, error) {
+	token := &oauth2.Token{
+		AccessToken: t.AccessToken,
+	}
+	return token, nil
+}
+
+func newClient() (*godo.Client, error) {
+	accessToken := os.Getenv("DIGITALOCEAN_ACCESS_TOKEN")
+	if accessToken == "" {
+		return nil, errors.New("DIGITALOCEAN_ACCESS_TOKEN is required")
+	}
+
+	tokenSource := &TokenSource{
+		AccessToken: accessToken,
+	}
+
+	oauthClient := oauth2.NewClient(oauth2.NoContext, tokenSource)
+	return godo.NewClient(oauthClient), nil
+}
 
 // DNS implements dnsprovider.Interface
 type DNS struct {
@@ -143,8 +189,11 @@ func (r *resourceRecordSets) List() ([]dnsprovider.ResourceRecordSet, error) {
 	var rrset *resourceRecordSet
 	var rrsets []dnsprovider.ResourceRecordSet
 	for _, record := range records {
+		// digitalocean API returns the record without the zone
+		// but the consumers of this interface expect the zone to be included
+		recordName := dns.EnsureDotSuffix(record.Name) + r.Zone().Name()
 		rrset = &resourceRecordSet{
-			name:       record.Name,
+			name:       recordName,
 			data:       record.Data,
 			ttl:        record.TTL,
 			recordType: rrstype.RrsType(record.Type),
@@ -274,20 +323,25 @@ func (r *resourceRecordChangeset) Apply() error {
 	}
 
 	if len(r.additions) > 0 {
-		for _, record := range r.additions {
-			recordCreateRequest := &godo.DomainRecordEditRequest{
-				Name: record.Name(),
-				Data: record.Rrdatas()[0],
-				TTL:  int(record.Ttl()),
-				Type: string(record.Type()),
-			}
-			err := createRecord(r.client, r.zone.Name(), recordCreateRequest)
+		for _, rrset := range r.additions {
+			err := r.applyResourceRecordSet(rrset)
 			if err != nil {
-				return fmt.Errorf("could not create record: %v", err)
+				return fmt.Errorf("failed to apply resource record set: %s, err: %s", rrset.Name(), err)
 			}
 		}
 
 		glog.V(2).Infof("record change set additions complete")
+	}
+
+	if len(r.upserts) > 0 {
+		for _, rrset := range r.upserts {
+			err := r.applyResourceRecordSet(rrset)
+			if err != nil {
+				return fmt.Errorf("failed to apply resource record set: %s, err: %s", rrset.Name(), err)
+			}
+		}
+
+		glog.V(2).Infof("record change set upserts complete")
 	}
 
 	if len(r.removals) > 0 {
@@ -297,60 +351,17 @@ func (r *resourceRecordChangeset) Apply() error {
 		}
 
 		for _, record := range r.removals {
-			var desiredRecord godo.DomainRecord
-			found := false
 			for _, domainRecord := range records {
 				if domainRecord.Name == record.Name() {
-					desiredRecord = domainRecord
-					found = true
+					err := deleteRecord(r.client, r.zone.Name(), domainRecord.ID)
+					if err != nil {
+						return fmt.Errorf("failed to delete record: %v", err)
+					}
 				}
-			}
-			if !found {
-				return fmt.Errorf("could not find desired record to remove")
-			}
-
-			err := deleteRecord(r.client, r.zone.Name(), desiredRecord.ID)
-			if err != nil {
-				return err
 			}
 		}
 
 		glog.V(2).Infof("record change set removals complete")
-	}
-
-	if len(r.upserts) > 0 {
-		records, err := getRecords(r.client, r.zone.Name())
-		if err != nil {
-			return err
-		}
-
-		for _, record := range r.upserts {
-			var desiredRecord godo.DomainRecord
-			found := false
-			for _, domainRecord := range records {
-				if domainRecord.Name == record.Name() {
-					desiredRecord = domainRecord
-					found = true
-				}
-			}
-
-			if !found {
-				return fmt.Errorf("could not find desired record to upsert")
-			}
-
-			domainEditRequest := &godo.DomainRecordEditRequest{
-				Name: record.Name(),
-				Data: record.Rrdatas()[0],
-				TTL:  int(record.Ttl()),
-				Type: string(record.Type()),
-			}
-			err := editRecord(r.client, r.zone.Name(), desiredRecord.ID, domainEditRequest)
-			if err != nil {
-				return err
-			}
-		}
-
-		glog.V(2).Infof("record change set upserts complete")
 	}
 
 	glog.V(2).Infof("record change sets successfully applied")
@@ -371,16 +382,45 @@ func (r *resourceRecordChangeset) ResourceRecordSets() dnsprovider.ResourceRecor
 	return r.rrsets
 }
 
+// applyResourceRecordSet will create records of a domain as required by resourceRecordChangeset
+// and delete any previously created records matching the same name.
+// This is required for digitalocean since it's API does not handle record sets, but
+// only individual records
+func (r *resourceRecordChangeset) applyResourceRecordSet(rrset dnsprovider.ResourceRecordSet) error {
+	deleteRecords, err := getRecordsByName(r.client, r.zone.Name(), rrset.Name())
+	if err != nil {
+		return fmt.Errorf("failed to get record IDs to delete")
+	}
+
+	for _, rrdata := range rrset.Rrdatas() {
+		recordCreateRequest := &godo.DomainRecordEditRequest{
+			Name: rrset.Name(),
+			Data: rrdata,
+			TTL:  int(rrset.Ttl()),
+			Type: string(rrset.Type()),
+		}
+		err := createRecord(r.client, r.zone.Name(), recordCreateRequest)
+		if err != nil {
+			return fmt.Errorf("could not create record: %v", err)
+		}
+	}
+
+	for _, record := range deleteRecords {
+		err := deleteRecord(r.client, r.zone.Name(), record.ID)
+		if err != nil {
+			return fmt.Errorf("error cleaning up old records: %v", err)
+		}
+	}
+
+	return nil
+}
+
 // listDomains returns a list of godo.Domain
 func listDomains(c *godo.Client) ([]godo.Domain, error) {
 	// TODO (andrewsykim): pagination in ListOptions
-	domains, resp, err := c.Domains.List(context.TODO(), &godo.ListOptions{})
+	domains, _, err := c.Domains.List(context.TODO(), &godo.ListOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("failed to list domains: %v", err)
-	}
-
-	if err = handleResponse(resp); err != nil {
-		return nil, err
 	}
 
 	return domains, err
@@ -388,12 +428,8 @@ func listDomains(c *godo.Client) ([]godo.Domain, error) {
 
 // createDomain creates a domain provided godo.DomainCreateRequest
 func createDomain(c *godo.Client, createRequest *godo.DomainCreateRequest) (*godo.Domain, error) {
-	domain, resp, err := c.Domains.Create(context.TODO(), createRequest)
+	domain, _, err := c.Domains.Create(context.TODO(), createRequest)
 	if err != nil {
-		return nil, err
-	}
-
-	if err = handleResponse(resp); err != nil {
 		return nil, err
 	}
 
@@ -402,12 +438,8 @@ func createDomain(c *godo.Client, createRequest *godo.DomainCreateRequest) (*god
 
 // deleteDomain deletes a domain given its name
 func deleteDomain(c *godo.Client, name string) error {
-	resp, err := c.Domains.Delete(context.TODO(), name)
+	_, err := c.Domains.Delete(context.TODO(), name)
 	if err != nil {
-		return err
-	}
-
-	if err = handleResponse(resp); err != nil {
 		return err
 	}
 
@@ -416,27 +448,59 @@ func deleteDomain(c *godo.Client, name string) error {
 
 // getRecords returns a list of godo.DomainRecord given a zone name
 func getRecords(c *godo.Client, zoneName string) ([]godo.DomainRecord, error) {
-	records, resp, err := c.Domains.Records(context.TODO(), zoneName, &godo.ListOptions{})
-	if err != nil {
-		return nil, err
+	allRecords := []godo.DomainRecord{}
+
+	opt := &godo.ListOptions{}
+	for {
+		records, resp, err := c.Domains.Records(context.TODO(), zoneName, opt)
+		if err != nil {
+			return nil, err
+		}
+
+		allRecords = append(allRecords, records...)
+
+		if resp.Links == nil || resp.Links.IsLastPage() {
+			break
+		}
+
+		page, err := resp.Links.CurrentPage()
+		if err != nil {
+			return nil, err
+		}
+
+		opt.Page = page + 1
 	}
 
-	if err = handleResponse(resp); err != nil {
-		return nil, err
-	}
-
-	return records, nil
+	return allRecords, nil
 }
 
-// createRecord creates a record given an assoicated zone and a godo.DomainRecordEditRequest
-func createRecord(c *godo.Client, zoneName string, createRequest *godo.DomainRecordEditRequest) error {
-	_, resp, err := c.Domains.CreateRecord(context.TODO(), zoneName, createRequest)
+// getRecordsByName returns a list of godo.DomainRecord based on the provided zone and name
+func getRecordsByName(client *godo.Client, zoneName, recordName string) ([]godo.DomainRecord, error) {
+	records, err := getRecords(client, zoneName)
 	if err != nil {
-		return fmt.Errorf("error applying changeset: %v", err)
+		return nil, err
 	}
 
-	if err = handleResponse(resp); err != nil {
-		return err
+	// digitalocean record.Name returns record without the zone suffix
+	// so normalize record by removing it
+	normalizedRecordName := strings.TrimSuffix(recordName, ".")
+	normalizedRecordName = strings.TrimSuffix(normalizedRecordName, "."+zoneName)
+
+	var recordsByName []godo.DomainRecord
+	for _, record := range records {
+		if record.Name == normalizedRecordName {
+			recordsByName = append(recordsByName, record)
+		}
+	}
+
+	return recordsByName, nil
+}
+
+// createRecord creates a record given an associated zone and a godo.DomainRecordEditRequest
+func createRecord(c *godo.Client, zoneName string, createRequest *godo.DomainRecordEditRequest) error {
+	_, _, err := c.Domains.CreateRecord(context.TODO(), zoneName, createRequest)
+	if err != nil {
+		return fmt.Errorf("error creating record: %v", err)
 	}
 
 	return nil
@@ -444,13 +508,9 @@ func createRecord(c *godo.Client, zoneName string, createRequest *godo.DomainRec
 
 // editRecord edits a record given an associated ozone and a godo.DomainRecordEditRequest
 func editRecord(c *godo.Client, zoneName string, recordID int, editRequest *godo.DomainRecordEditRequest) error {
-	_, resp, err := c.Domains.EditRecord(context.TODO(), zoneName, recordID, editRequest)
+	_, _, err := c.Domains.EditRecord(context.TODO(), zoneName, recordID, editRequest)
 	if err != nil {
-		return fmt.Errorf("error applying changeset: %v", err)
-	}
-
-	if err = handleResponse(resp); err != nil {
-		return err
+		return fmt.Errorf("error editing record: %v", err)
 	}
 
 	return nil
@@ -458,27 +518,9 @@ func editRecord(c *godo.Client, zoneName string, recordID int, editRequest *godo
 
 // deleteRecord deletes a record given an associated zone and a record ID
 func deleteRecord(c *godo.Client, zoneName string, recordID int) error {
-	resp, err := c.Domains.DeleteRecord(context.TODO(), zoneName, recordID)
+	_, err := c.Domains.DeleteRecord(context.TODO(), zoneName, recordID)
 	if err != nil {
-		return fmt.Errorf("error applying changeset: %v", err)
-	}
-
-	if err = handleResponse(resp); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func handleResponse(resp *godo.Response) error {
-	if resp.StatusCode != http.StatusOK {
-		respData, err := ioutil.ReadAll(resp.Body)
-		if err != nil {
-			return fmt.Errorf("error reading response body: %v", err)
-		}
-
-		return fmt.Errorf("received non 200 status code: %d from api: %v",
-			resp.StatusCode, string(respData))
+		return fmt.Errorf("error deleting record: %v", err)
 	}
 
 	return nil

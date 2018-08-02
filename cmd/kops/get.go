@@ -17,7 +17,6 @@ limitations under the License.
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 
@@ -28,29 +27,27 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/kops/cmd/kops/util"
 	api "k8s.io/kops/pkg/apis/kops"
+	"k8s.io/kops/pkg/kopscodecs"
 	"k8s.io/kubernetes/pkg/kubectl/cmd/templates"
-	"k8s.io/kubernetes/pkg/util/i18n"
+	"k8s.io/kubernetes/pkg/kubectl/util/i18n"
 )
 
 var (
-	get_long = templates.LongDesc(i18n.T(`
+	getLong = templates.LongDesc(i18n.T(`
 	Display one or many resources.` + validResources))
 
-	get_example = templates.Examples(i18n.T(`
-	# Get all resource in a single cluster as yaml
-	kops get --name k8s-cluster.example.com -o yaml
-
+	getExample = templates.Examples(i18n.T(`
 	# Get all clusters in a state store
 	kops get clusters
 
-	# Get a cluster
-	kops get cluster k8s-cluster.example.com
+	# Get a cluster and its instancegroups
+	kops get k8s-cluster.example.com
 
-	# Get a cluster YAML cluster spec
-	kops get cluster k8s-cluster.example.com -o yaml
+	# Get a cluster and its instancegroups' YAML desired configuration
+	kops get k8s-cluster.example.com -o yaml
 
-	# Get an instancegroup
-	kops get ig --name k8s-cluster.example.com nodes
+	# Save a cluster and its instancegroups' desired configuration to YAML file
+	kops get k8s-cluster.example.com -o yaml > cluster-desired-config.yaml
 
 	# Get a secret
 	kops get secrets kube -oplaintext
@@ -58,7 +55,7 @@ var (
 	# Get the admin password for a cluster
 	kops get secrets admin -oplaintext`))
 
-	get_short = i18n.T(`Get one or many resources.`)
+	getShort = i18n.T(`Get one or many resources.`)
 )
 
 type GetOptions struct {
@@ -80,9 +77,9 @@ func NewCmdGet(f *util.Factory, out io.Writer) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:        "get",
 		SuggestFor: []string{"list"},
-		Short:      get_short,
-		Long:       get_long,
-		Example:    get_example,
+		Short:      getShort,
+		Long:       getLong,
+		Example:    getExample,
 		Run: func(cmd *cobra.Command, args []string) {
 			if len(args) != 0 {
 				options.clusterName = args[0]
@@ -107,7 +104,6 @@ func NewCmdGet(f *util.Factory, out io.Writer) *cobra.Command {
 
 	// create subcommands
 	cmd.AddCommand(NewCmdGetCluster(f, out, options))
-	cmd.AddCommand(NewCmdGetFederations(f, out, options))
 	cmd.AddCommand(NewCmdGetInstanceGroups(f, out, options))
 	cmd.AddCommand(NewCmdGetSecrets(f, out, options))
 
@@ -127,8 +123,7 @@ func RunGet(context Factory, out io.Writer, options *GetOptions) error {
 	}
 
 	if cluster == nil {
-		fmt.Fprintf(os.Stderr, "No cluster found\n")
-		return nil
+		return fmt.Errorf("No cluster found")
 	}
 
 	clusterList := &api.ClusterList{}
@@ -138,6 +133,9 @@ func RunGet(context Factory, out io.Writer, options *GetOptions) error {
 	args := make([]string, 0)
 
 	clusters, err := buildClusters(args, clusterList)
+	if err != nil {
+		return fmt.Errorf("error on buildClusters(): %v", err)
+	}
 
 	ig, err := client.InstanceGroupsFor(cluster).List(metav1.ListOptions{})
 	if err != nil {
@@ -153,35 +151,27 @@ func RunGet(context Factory, out io.Writer, options *GetOptions) error {
 		return err
 	}
 
+	var obj []runtime.Object
+	if options.output != OutputTable {
+		obj = append(obj, cluster)
+		for _, group := range instancegroups {
+			obj = append(obj, group)
+		}
+	}
+
 	switch options.output {
 	case OutputYaml:
-
-		err = clusterOutputYAML(clusters, out)
-		if err != nil {
-			return err
+		if err := fullOutputYAML(out, obj...); err != nil {
+			return fmt.Errorf("error writing cluster yaml to stdout: %v", err)
 		}
 
-		if err := writeYAMLSep(out); err != nil {
-			return err
-		}
-
-		err = igOutputYAML(instancegroups, out)
-		if err != nil {
-			return err
-		}
+		return nil
 
 	case OutputJSON:
-		return fmt.Errorf("not implemented")
-		// TODO this is not outputing valid json.  Not sure what cluster and instance groups should look like
-		/*
-			err = clusterOutputJson(clusters,out)
-			if err != nil {
-				return err
-			}
-			err = igOutputJson(instancegroups,out)
-			if err != nil {
-				return err
-			}*/
+		if err := fullOutputJSON(out, obj...); err != nil {
+			return fmt.Errorf("error writing cluster json to stdout: %v", err)
+		}
+		return nil
 
 	case OutputTable:
 		fmt.Fprintf(os.Stdout, "Cluster\n")
@@ -190,7 +180,7 @@ func RunGet(context Factory, out io.Writer, options *GetOptions) error {
 			return err
 		}
 		fmt.Fprintf(os.Stdout, "\nInstance Groups\n")
-		err = igOutputTable(instancegroups, out)
+		err = igOutputTable(cluster, instancegroups, out)
 		if err != nil {
 			return err
 		}
@@ -226,7 +216,7 @@ func marshalToWriter(obj runtime.Object, marshal marshalFunc, w io.Writer) error
 
 // obj must be a pointer to a marshalable object
 func marshalYaml(obj runtime.Object) ([]byte, error) {
-	y, err := api.ToVersionedYaml(obj)
+	y, err := kopscodecs.ToVersionedYaml(obj)
 	if err != nil {
 		return nil, fmt.Errorf("error marshaling yaml: %v", err)
 	}
@@ -235,7 +225,7 @@ func marshalYaml(obj runtime.Object) ([]byte, error) {
 
 // obj must be a pointer to a marshalable object
 func marshalJSON(obj runtime.Object) ([]byte, error) {
-	j, err := json.MarshalIndent(obj, "", "  ")
+	j, err := kopscodecs.ToVersionedJSON(obj)
 	if err != nil {
 		return nil, fmt.Errorf("error marshaling json: %v", err)
 	}

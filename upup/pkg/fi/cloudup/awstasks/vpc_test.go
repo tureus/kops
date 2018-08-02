@@ -17,13 +17,14 @@ limitations under the License.
 package awstasks
 
 import (
+	"reflect"
+	"testing"
+
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/ec2"
 	"k8s.io/kops/cloudmock/aws/mockec2"
 	"k8s.io/kops/upup/pkg/fi"
 	"k8s.io/kops/upup/pkg/fi/cloudup/awsup"
-	"reflect"
-	"testing"
 )
 
 func TestVPCCreate(t *testing.T) {
@@ -51,7 +52,7 @@ func TestVPCCreate(t *testing.T) {
 			Cloud: cloud,
 		}
 
-		context, err := fi.NewContext(target, cloud, nil, nil, nil, true, allTasks)
+		context, err := fi.NewContext(target, nil, cloud, nil, nil, nil, true, allTasks)
 		if err != nil {
 			t.Fatalf("error building context: %v", err)
 		}
@@ -101,4 +102,29 @@ func buildTags(tags map[string]string) []*ec2.Tag {
 		})
 	}
 	return t
+}
+
+// Test4758 is a sanity check for https://github.com/kubernetes/kops/issues/4758
+func Test4758(t *testing.T) {
+	a := &VPC{
+		Name: s("cluster2.example.com"),
+		Tags: map[string]string{},
+	}
+
+	e := &VPC{
+		Name: s("cluster2.example.com"),
+		Tags: map[string]string{},
+	}
+
+	changes := &VPC{}
+	changed := fi.BuildChanges(a, e, changes)
+
+	if changed {
+		t.Errorf("expected changed=false")
+	}
+
+	expectedChanges := &VPC{}
+	if !reflect.DeepEqual(changes, expectedChanges) {
+		t.Errorf("unexpected changes: +%v", changes)
+	}
 }

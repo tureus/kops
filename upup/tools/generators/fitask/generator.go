@@ -18,8 +18,9 @@ package main
 
 import (
 	"io"
-	"k8s.io/kops/upup/tools/generators/pkg/codegen"
 	"text/template"
+
+	"k8s.io/kops/upup/tools/generators/pkg/codegen"
 )
 
 type FitaskGenerator struct {
@@ -29,7 +30,7 @@ type FitaskGenerator struct {
 var _ codegen.Generator = &FitaskGenerator{}
 
 const fileHeaderDef = `/*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2018 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -83,6 +84,11 @@ var _ fi.HasLifecycle = &{{.Name}}{}
 // GetLifecycle returns the Lifecycle of the object, implementing fi.HasLifecycle
 func (o *{{.Name}}) GetLifecycle() *fi.Lifecycle {
 	return o.Lifecycle
+}
+
+// SetLifecycle sets the Lifecycle of the object, implementing fi.SetLifecycle
+func (o *{{.Name}}) SetLifecycle(lifecycle fi.Lifecycle) {
+	o.Lifecycle = &lifecycle
 }
 
 var _ fi.HasName = &{{.Name}}{}

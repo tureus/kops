@@ -1,5 +1,5 @@
 /*
-Copyright 2017 The Kubernetes Authors.
+Copyright 2018 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -26,8 +26,9 @@ import (
 type KopsV1alpha2Interface interface {
 	RESTClient() rest.Interface
 	ClustersGetter
-	FederationsGetter
 	InstanceGroupsGetter
+	KeysetsGetter
+	SSHCredentialsGetter
 }
 
 // KopsV1alpha2Client is used to interact with features provided by the kops group.
@@ -39,12 +40,16 @@ func (c *KopsV1alpha2Client) Clusters(namespace string) ClusterInterface {
 	return newClusters(c, namespace)
 }
 
-func (c *KopsV1alpha2Client) Federations(namespace string) FederationInterface {
-	return newFederations(c, namespace)
-}
-
 func (c *KopsV1alpha2Client) InstanceGroups(namespace string) InstanceGroupInterface {
 	return newInstanceGroups(c, namespace)
+}
+
+func (c *KopsV1alpha2Client) Keysets(namespace string) KeysetInterface {
+	return newKeysets(c, namespace)
+}
+
+func (c *KopsV1alpha2Client) SSHCredentials(namespace string) SSHCredentialInterface {
+	return newSSHCredentials(c, namespace)
 }
 
 // NewForConfig creates a new KopsV1alpha2Client for the given config.
