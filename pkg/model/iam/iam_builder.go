@@ -631,11 +631,12 @@ func addMasterEC2Policies(p *Policy, resource stringorslice.StringOrSlice, legac
 			&Statement{
 				Effect: StatementEffectAllow,
 				Action: stringorslice.Slice([]string{
-					"ec2:CreateSecurityGroup",     // aws.go
-					"ec2:CreateTags",              // aws.go, tag.go
-					"ec2:CreateVolume",            // aws.go
-					"ec2:ModifyInstanceAttribute", // aws.go
-					"ec2:ModifyVolume",            // aws.go
+					"ec2:CreateSecurityGroup",          // aws.go
+					"ec2:CreateTags",                   // aws.go, tag.go
+					"ec2:CreateVolume",                 // aws.go
+					"ec2:DescribeVolumesModifications", // aws.go
+					"ec2:ModifyInstanceAttribute",      // aws.go
+					"ec2:ModifyVolume",                 // aws.go
 				}),
 				Resource: resource,
 			},
@@ -726,7 +727,6 @@ func addMasterASPolicies(p *Policy, resource stringorslice.StringOrSlice, legacy
 				"autoscaling:DescribeAutoScalingInstances",
 				"autoscaling:DescribeLaunchConfigurations",
 				"autoscaling:DescribeTags",
-				"autoscaling:GetAsgForInstance",
 				"autoscaling:SetDesiredCapacity",
 				"autoscaling:TerminateInstanceInAutoScalingGroup",
 				"autoscaling:UpdateAutoScalingGroup",
@@ -743,7 +743,6 @@ func addMasterASPolicies(p *Policy, resource stringorslice.StringOrSlice, legacy
 					"autoscaling:DescribeAutoScalingGroups",    // aws_instancegroups.go
 					"autoscaling:DescribeLaunchConfigurations", // aws.go
 					"autoscaling:DescribeTags",                 // auto_scaling.go
-					"autoscaling:GetAsgForInstance",            // aws_manager.go
 				),
 				Resource: resource,
 			},

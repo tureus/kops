@@ -81,9 +81,10 @@ const TagNameKopsRole = "kubernetes.io/kops/role"
 const TagNameClusterOwnershipPrefix = "kubernetes.io/cluster/"
 
 const (
-	WellKnownAccountKopeio = "383156758163"
-	WellKnownAccountRedhat = "309956199498"
-	WellKnownAccountCoreOS = "595879546273"
+	WellKnownAccountKopeio             = "383156758163"
+	WellKnownAccountRedhat             = "309956199498"
+	WellKnownAccountCoreOS             = "595879546273"
+	WellKnownAccountAmazonSystemLinux2 = "137112412989"
 )
 
 type AWSCloud interface {
@@ -947,6 +948,8 @@ func resolveImage(ec2Client ec2iface.EC2API, name string) (*ec2.Image, error) {
 				owner = WellKnownAccountCoreOS
 			case "redhat.com":
 				owner = WellKnownAccountRedhat
+			case "amazon.com":
+				owner = WellKnownAccountAmazonSystemLinux2
 			}
 
 			request.Owners = []*string{&owner}
