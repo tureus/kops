@@ -83,6 +83,8 @@ spec:
             valueFrom:
               fieldRef:
                 fieldPath: metadata.namespace
+          - name: WARM_IP_TARGET
+            value: "1"
         resources:
           requests:
             cpu: 10m
