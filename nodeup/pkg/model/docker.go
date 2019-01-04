@@ -549,7 +549,7 @@ var dockerVersions = []dockerVersion{
 		Version:       "18.06.1.ce",
 		Source:        "http://mirror.centos.org/centos/7/extras/x86_64/Packages/container-selinux-2.68-1.el7.noarch.rpm",
 		Hash:          "d9f87f7f4f2e8e611f556d873a17b8c0c580fec0",
-		Dependencies:  []string{},
+		Dependencies:  []string{"policycoreutils-python"},
 	},
 	{
 		DockerVersion: "18.06.1",
