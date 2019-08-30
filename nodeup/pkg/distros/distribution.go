@@ -81,7 +81,7 @@ func (d Distribution) IsDebianFamily() bool {
 		return true
 	case DistributionCentos7, DistributionRhel7:
 		return false
-	case DistributionCoreOS, DistributionContainerOS:
+	case DistributionCoreOS, DistributionContainerOS, DistributionAmazonLinux2:
 		return false
 	default:
 		glog.Fatalf("unknown distribution: %s", d)
@@ -91,7 +91,7 @@ func (d Distribution) IsDebianFamily() bool {
 
 func (d Distribution) IsRHELFamily() bool {
 	switch d {
-	case DistributionCentos7, DistributionRhel7:
+	case DistributionCentos7, DistributionRhel7, DistributionAmazonLinux2:
 		return true
 	case DistributionJessie, DistributionXenial, DistributionBionic, DistributionDebian9:
 		return false
@@ -112,6 +112,8 @@ func (d Distribution) IsSystemd() bool {
 	case DistributionCoreOS:
 		return true
 	case DistributionContainerOS:
+		return true
+	case DistributionAmazonLinux2:
 		return true
 	default:
 		glog.Fatalf("unknown distribution: %s", d)
