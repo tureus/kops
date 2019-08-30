@@ -32,6 +32,7 @@ var (
 	DistributionCentos7     Distribution = "centos7"
 	DistributionCoreOS      Distribution = "coreos"
 	DistributionContainerOS Distribution = "containeros"
+	DistributionAmazonLinux2 Distribution = "amazonlinux2"
 )
 
 func (d Distribution) BuildTags() []string {
@@ -54,6 +55,8 @@ func (d Distribution) BuildTags() []string {
 		t = []string{"_coreos"}
 	case DistributionContainerOS:
 		t = []string{"_containeros"}
+	case DistributionAmazonLinux2:
+		t = []string{"_amazonlinux2"}
 	default:
 		glog.Fatalf("unknown distribution: %s", d)
 		return nil
